@@ -3,6 +3,12 @@ name = "poe_api_process"
 version = "0.1.0"
 edition = "2021"
 publish = ["crates-io"]
+authors = ["Jerome Leong <jeromeleong1998@gmail.com>"]
+description = "Poe API for rust"
+repository = "https://github.com/jeromeleong/poe_bot_process"
+license = "MIT"
+keywords = ["poeapi", "ai"]
+categories = ["API bindings"]
 
 [dependencies]
 reqwest = { version = "0.12.8", features = ["json", "stream"] }
