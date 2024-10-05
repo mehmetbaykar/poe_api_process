@@ -10,7 +10,4 @@ pub enum PoeError {
 
     #[error("Bot error: {0}")]
     BotError(String),
-
-    #[error("Invalid parameter: {0}")]
-    InvalidParameter(String),
 }
