@@ -12,6 +12,8 @@ pub struct QueryRequest {
     pub version: String,
     pub r#type: String,
     pub query: Vec<ProtocolMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
     pub user_id: String,
     pub conversation_id: String,
     pub message_id: String,
@@ -25,8 +27,7 @@ pub struct PartialResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
-    pub object: String,
-    pub description: String,
+    pub object: String
 }
 
 #[derive(Debug, Serialize, Deserialize)]

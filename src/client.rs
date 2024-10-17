@@ -1,5 +1,6 @@
 use crate::types::*;
 use crate::error::PoeError;
+use bytes::BytesMut;
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, COOKIE};
 use reqwest::Client;
@@ -36,27 +37,35 @@ impl PoeClient {
     
         let stream = response.bytes_stream().map(move |result| {
             result.map_err(PoeError::from).and_then(|chunk| {
-                let chunk_str = String::from_utf8_lossy(&chunk);
-                let mut lines = chunk_str.lines();
+                let mut buffer = BytesMut::new();
+                buffer.extend_from_slice(&chunk);
                 
-                while let Some(line) = lines.next() {
-                    if line.starts_with("event: ") {
-                        let event_type = match &line["event: ".len()..] {
-                            "text" => EventType::Text,
-                            "replace_response" => EventType::ReplaceResponse,
-                            "done" => EventType::Done,
+                let mut events = Vec::new();
+                
+                while let Some(i) = buffer.iter().position(|&b| b == b'\n') {
+                    let line = buffer.split_to(i + 1);
+                    let line_str = std::str::from_utf8(&line).map_err(|e| PoeError::BotError(e.to_string()))?;
+                    
+                    if line_str.starts_with("event: ") {
+                        let event_type = match &line_str["event: ".len()..].trim() {
+                            &"text" => EventType::Text,
+                            &"replace_response" => EventType::ReplaceResponse,
+                            &"done" => EventType::Done,
                             _ => continue,
                         };
                         
-                        if let Some(data_line) = lines.next() {
-                            if data_line.starts_with("data: ") {
-                                let data = &data_line["data: ".len()..];
+                        if let Some(i) = buffer.iter().position(|&b| b == b'\n') {
+                            let data_line = buffer.split_to(i + 1);
+                            let data_str = std::str::from_utf8(&data_line).map_err(|e| PoeError::BotError(e.to_string()))?;
+                            
+                            if data_str.starts_with("data: ") {
+                                let data = &data_str["data: ".len()..].trim();
                                 match event_type {
                                     EventType::Text | EventType::ReplaceResponse => {
                                         if let Ok(json) = serde_json::from_str::<Value>(data) {
                                             if let Some(text) = json.get("text").and_then(Value::as_str) {
-                                                return Ok(EventResponse {
-                                                    event: EventType::Text,
+                                                events.push(EventResponse {
+                                                    event: event_type,
                                                     data: Some(PartialResponse {
                                                         text: text.to_string(),
                                                     }),
@@ -65,7 +74,7 @@ impl PoeClient {
                                         }
                                     },
                                     EventType::Done => {
-                                        return Ok(EventResponse {
+                                        events.push(EventResponse {
                                             event: EventType::Done,
                                             data: None,
                                         });
@@ -76,13 +85,22 @@ impl PoeClient {
                     }
                 }
                 
-                // 如果沒有找到有效的事件，返回一個空的文字事件
-                Ok(EventResponse {
-                    event: EventType::Text,
-                    data: Some(PartialResponse {
-                        text: String::new(),
-                    }),
-                })
+                if events.is_empty() {
+                    events.push(EventResponse {
+                        event: EventType::Text,
+                        data: Some(PartialResponse {
+                            text: String::new(),
+                        }),
+                    });
+                }
+                
+                Ok(events)
+            })
+        })
+        .flat_map(|result| {
+            futures_util::stream::iter(match result {
+                Ok(events) => events.into_iter().map(Ok).collect::<Vec<_>>(),
+                Err(e) => vec![Err(e)],
             })
         });
     
@@ -120,14 +138,13 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelListResp
 
     let data: Value = response.json().await?;
     
-    let mut model_list = Vec::new();
+    let mut model_list = Vec::with_capacity(150);
     if let Some(edges) = data["data"]["exploreBotsConnection"]["edges"].as_array() {
         for edge in edges {
-            if let (Some(handle), Some(description)) = (edge["node"]["handle"].as_str(), edge["node"]["description"].as_str()) {
+            if let Some(handle) = edge["node"]["handle"].as_str() {
                 model_list.push(ModelInfo {
                     id: handle.to_string(),
-                    object: "model".to_string(),
-                    description: description.to_string(),
+                    object: "model".to_string()
                 });
             }
         }
