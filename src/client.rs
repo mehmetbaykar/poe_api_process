@@ -10,6 +10,7 @@ use futures_util::Stream;
 
 const BASE_URL: &str = "https://api.poe.com/bot/";
 const POE_GQL_URL: &str = "https://poe.com/api/gql_POST";
+const POE_GQL_MODEL_HASH: &str = "b24b2f2f6da147b3345eec1a433ed17b6e1332df97dea47622868f41078a40cc";
 
 pub struct PoeClient {
     client: Client,
@@ -44,43 +45,80 @@ impl PoeClient {
                 
                 while let Some(i) = buffer.iter().position(|&b| b == b'\n') {
                     let line = buffer.split_to(i + 1);
-                    let line_str = std::str::from_utf8(&line).map_err(|e| PoeError::BotError(e.to_string()))?;
+                    let line_str = std::str::from_utf8(&line)
+                        .map_err(|e| PoeError::EventParseFailed(format!("無法解析事件文字: {}", e)))?;
                     
                     if line_str.starts_with("event: ") {
                         let event_type = match &line_str["event: ".len()..].trim() {
                             &"text" => EventType::Text,
                             &"replace_response" => EventType::ReplaceResponse,
                             &"done" => EventType::Done,
-                            _ => continue,
+                            &"error" => EventType::Error,
+                            unknown => {
+                                return Err(PoeError::InvalidEventType(format!(
+                                    "收到未知的事件類型: {}", unknown
+                                )));
+                            }
                         };
                         
                         if let Some(i) = buffer.iter().position(|&b| b == b'\n') {
                             let data_line = buffer.split_to(i + 1);
-                            let data_str = std::str::from_utf8(&data_line).map_err(|e| PoeError::BotError(e.to_string()))?;
+                            let data_str = std::str::from_utf8(&data_line)
+                                .map_err(|e| PoeError::EventParseFailed(format!("無法解析事件資料: {}", e)))?;
                             
                             if data_str.starts_with("data: ") {
                                 let data = &data_str["data: ".len()..].trim();
                                 match event_type {
                                     EventType::Text | EventType::ReplaceResponse => {
-                                        if let Ok(json) = serde_json::from_str::<Value>(data) {
-                                            if let Some(text) = json.get("text").and_then(Value::as_str) {
-                                                events.push(EventResponse {
-                                                    event: event_type,
-                                                    data: Some(PartialResponse {
-                                                        text: text.to_string(),
-                                                    }),
-                                                });
-                                            }
-                                        }
+                                        let json = serde_json::from_str::<Value>(data)
+                                            .map_err(|e| PoeError::EventError(format!("JSON 解析失敗: {}", e)))?;
+                                                
+                                        let text = json.get("text")
+                                            .and_then(Value::as_str)
+                                            .ok_or_else(|| PoeError::EventError("事件資料缺少 text 欄位".to_string()))?;
+
+                                        events.push(EventResponse {
+                                            event: event_type,
+                                            data: Some(PartialResponse {
+                                                text: text.to_string(),
+                                            }),
+                                            error: None,
+                                        });
+                                    },
+                                    EventType::Error => {
+                                        let json: Value = serde_json::from_str(data)
+                                            .map_err(|e| PoeError::EventError(format!("JSON 解析失敗: {}", e)))?;
+                                        
+                                        let text = json.get("text")
+                                            .and_then(Value::as_str)
+                                            .ok_or_else(|| PoeError::EventError("錯誤事件缺少 text 欄位".to_string()))?;
+                                        
+                                        let allow_retry = json.get("allow_retry")
+                                            .and_then(Value::as_bool)
+                                            .unwrap_or(false);
+
+                                        events.push(EventResponse {
+                                            event: EventType::Error,
+                                            data: None,
+                                            error: Some(ErrorResponse {
+                                                text: text.to_string(),
+                                                allow_retry,
+                                            }),
+                                        });
                                     },
                                     EventType::Done => {
                                         events.push(EventResponse {
                                             event: EventType::Done,
                                             data: None,
+                                            error: None,
                                         });
                                     }
                                 }
+                            } else {
+                                return Err(PoeError::EventError("無效的事件資料格式".to_string()));
                             }
+                        } else {
+                            return Err(PoeError::EventError("事件資料不完整".to_string()));
                         }
                     }
                 }
@@ -91,6 +129,7 @@ impl PoeClient {
                         data: Some(PartialResponse {
                             text: String::new(),
                         }),
+                        error: None,
                     });
                 }
                 
@@ -117,7 +156,7 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelListResp
             "count": 150
         },
         "extensions": {
-            "hash": "b24b2f2f6da147b3345eec1a433ed17b6e1332df97dea47622868f41078a40cc"
+            "hash": POE_GQL_MODEL_HASH
         }
     });
 
@@ -144,7 +183,9 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelListResp
             if let Some(handle) = edge["node"]["handle"].as_str() {
                 model_list.push(ModelInfo {
                     id: handle.to_string(),
-                    object: "model".to_string()
+                    object: "model".to_string(),
+                    created: 0,
+                    owned_by: "poe".to_string(),
                 });
             }
         }
