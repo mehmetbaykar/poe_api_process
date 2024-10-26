@@ -12,7 +12,7 @@
 在您的 `Cargo.toml` 文件中添加以下依賴：
 ```toml
 [dependencies]
-poe_api_process = "0.1.3"
+poe_api_process = "0.1.4"
 ```
 
 Or
