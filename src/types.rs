@@ -43,7 +43,7 @@ pub struct ModelListResponse {
     pub data: Vec<ModelInfo>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum EventType {
     Text,
     ReplaceResponse,
