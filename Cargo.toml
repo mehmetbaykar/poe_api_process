@@ -1,6 +1,6 @@
 [package]
 name = "poe_api_process"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 publish = ["crates-io"]
 authors = ["Jerome Leong <jeromeleong1998@gmail.com>"]
@@ -12,10 +12,15 @@ categories = ["api-bindings"]
 
 [dependencies]
 reqwest = { version = "0.12.8", features = ["json", "stream"] }
-tokio = { version = "1.40.0", features = ["full"] }
-serde = { version = "1.0.213", features = ["derive"] }
-serde_json = "1.0.132"
+tokio = { version = "1.43.0", features = ["full"] }
+serde = { version = "1.0.218", features = ["derive"] }
+serde_json = "1.0.139"
 futures-util = "0.3.31"
-async-trait = "0.1.83"
-thiserror = "1.0.65"
-bytes = "1.8.0"
+async-trait = "0.1.86"
+thiserror = "2.0.11"
+bytes = "1.10.0"
+tracing = "0.1.41"
+
+[dev-dependencies]
+test-log = { version = "0.2.17", features = ["trace"] }
+dotenv = "0.15.0"
