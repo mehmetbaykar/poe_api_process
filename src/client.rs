@@ -49,6 +49,10 @@ impl PoeClient {
         let mut static_buffer = String::new();
         let mut current_event: Option<EventType> = None;
         let mut is_collecting_data = false;
+        
+        // 用於累積 tool_calls 的狀態
+        let mut accumulated_tool_calls: Vec<AccumulatedToolCall> = Vec::new();
+        let mut tool_calls_complete = false;
 
         let stream = response.bytes_stream().map(move |result| {
             result.map_err(PoeError::from).and_then(|chunk| {
@@ -62,7 +66,14 @@ impl PoeClient {
                 // 尋找完整的消息
                 while let Some(newline_pos) = static_buffer.find('\n') {
                     let line = static_buffer[..newline_pos].trim().to_string();
-                    static_buffer = static_buffer[newline_pos + 1..].to_string();             
+                    static_buffer = static_buffer[newline_pos + 1..].to_string();
+                    
+                    if line.is_empty() { 
+                        // 重置當前事件狀態，準備處理下一個事件
+                        current_event = None;
+                        is_collecting_data = false;
+                        continue;
+                    }
                     
                     if line == ": ping" {
                         debug!("收到 ping 訊號");
@@ -79,6 +90,9 @@ impl PoeClient {
                             },
                             "replace_response" => {
                                 EventType::ReplaceResponse
+                            },
+                            "json" => {
+                                EventType::Json
                             },
                             "done" => {
                                 EventType::Done
@@ -112,10 +126,89 @@ impl PoeClient {
                                                     text: text.to_string(),
                                                 }),
                                                 error: None,
+                                                tool_calls: None,
                                             }));
                                         }
                                     } else {
                                         debug!("JSON 解析失敗，可能是不完整的數據，等待更多數據");
+                                        is_collecting_data = true;
+                                    }
+                                },
+                                EventType::Json => {
+                                    if let Ok(json) = serde_json::from_str::<Value>(data) {
+                                        debug!("解析到 JSON 事件數據");
+                                        
+                                        // 檢查是否有 finish_reason: "tool_calls"，表示工具調用完成
+                                        let finish_reason = json
+                                            .get("choices")
+                                            .and_then(|choices| choices.get(0))
+                                            .and_then(|choice| choice.get("finish_reason"))
+                                            .and_then(Value::as_str);
+                                            
+                                        if finish_reason == Some("tool_calls") {
+                                            debug!("檢測到工具調用完成標誌");
+                                            tool_calls_complete = true;
+                                        }
+                                        
+                                        // 檢查是否包含 tool_calls delta
+                                        let tool_calls_delta = json
+                                            .get("choices")
+                                            .and_then(|choices| choices.get(0))
+                                            .and_then(|choice| choice.get("delta"))
+                                            .and_then(|delta| delta.get("tool_calls"));
+                                            
+                                        if let Some(tool_calls_array) = tool_calls_delta {
+                                            debug!("檢測到工具調用 delta");
+                                            
+                                            // 處理每個工具調用的 delta
+                                            if let Some(tool_calls) = tool_calls_array.as_array() {
+                                                for tool_call_delta in tool_calls {
+                                                    let index = tool_call_delta
+                                                        .get("index")
+                                                        .and_then(Value::as_u64)
+                                                        .unwrap_or(0) as usize;
+                                                        
+                                                    // 確保 accumulated_tool_calls 有足夠的元素
+                                                    while accumulated_tool_calls.len() <= index {
+                                                        accumulated_tool_calls.push(AccumulatedToolCall::default());
+                                                    }
+                                                    
+                                                    // 更新 id 和 type
+                                                    if let Some(id) = tool_call_delta.get("id").and_then(Value::as_str) {
+                                                        accumulated_tool_calls[index].id = id.to_string();
+                                                    }
+                                                    
+                                                    if let Some(type_str) = tool_call_delta.get("type").and_then(Value::as_str) {
+                                                        accumulated_tool_calls[index].r#type = type_str.to_string();
+                                                    }
+                                                    
+                                                    // 更新 function 相關欄位
+                                                    if let Some(function) = tool_call_delta.get("function") {
+                                                        if let Some(name) = function.get("name").and_then(Value::as_str) {
+                                                            accumulated_tool_calls[index].function_name = name.to_string();
+                                                        }
+                                                        
+                                                        if let Some(args) = function.get("arguments").and_then(Value::as_str) {
+                                                            accumulated_tool_calls[index].function_arguments.push_str(args);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else if !tool_calls_complete {
+                                            // 如果沒有 tool_calls delta 且工具調用尚未完成，
+                                            // 則按一般 JSON 處理（例如 chat.completion.chunk 的文本部分）
+                                            // 避免在工具調用完成後，將 finish_reason 事件誤判為普通 JSON
+                                            events.push(Ok(EventResponse {
+                                                event: EventType::Json,
+                                                data: Some(PartialResponse {
+                                                    text: data.to_string(),
+                                                }),
+                                                error: None,
+                                                tool_calls: None,
+                                            }));
+                                        }
+                                    } else {
+                                        debug!("JSON 事件解析失敗，可能是不完整的數據");
                                         is_collecting_data = true;
                                     }
                                 },
@@ -125,6 +218,7 @@ impl PoeClient {
                                         event: EventType::Done,
                                         data: None,
                                         error: None,
+                                        tool_calls: None,
                                     }));
                                     current_event = None;
                                 },
@@ -145,6 +239,7 @@ impl PoeClient {
                                                 text: text.to_string(),
                                                 allow_retry,
                                             }),
+                                            tool_calls: None,
                                         }));
                                     } else {
                                         warn!("無法解析錯誤事件數據: {}", data);
@@ -159,21 +254,165 @@ impl PoeClient {
                         // 嘗試解析累積的 JSON
                         debug!("嘗試解析未完整的 JSON 數據: {}", line);
                         if let Some(ref event_type) = current_event {
-                            if let Ok(json) = serde_json::from_str::<Value>(&line) {
-                                if let Some(text) = json.get("text").and_then(Value::as_str) {
-                                    debug!("成功解析到累積的 JSON 文本，長度: {}", text.len());
-                                    events.push(Ok(EventResponse {
-                                        event: event_type.clone(),
-                                        data: Some(PartialResponse {
-                                            text: text.to_string(),
-                                        }),
-                                        error: None,
-                                    }));
+                            match event_type {
+                                EventType::Text | EventType::ReplaceResponse => {
+                                    if let Ok(json) = serde_json::from_str::<Value>(&line) {
+                                        if let Some(text) = json.get("text").and_then(Value::as_str) {
+                                            debug!("成功解析到累積的 JSON 文本，長度: {}", text.len());
+                                            events.push(Ok(EventResponse {
+                                                event: event_type.clone(),
+                                                data: Some(PartialResponse {
+                                                    text: text.to_string(),
+                                                }),
+                                                error: None,
+                                                tool_calls: None,
+                                            }));
+                                            is_collecting_data = false;
+                                            current_event = None;
+                                        }
+                                    }
+                                },
+                                EventType::Json => {
+                                    if let Ok(json) = serde_json::from_str::<Value>(&line) {
+                                        debug!("成功解析到累積的 JSON 事件數據");
+                                        
+                                        // 檢查是否有 finish_reason: "tool_calls"
+                                        let finish_reason = json
+                                            .get("choices")
+                                            .and_then(|choices| choices.get(0))
+                                            .and_then(|choice| choice.get("finish_reason"))
+                                            .and_then(Value::as_str);
+                                            
+                                        if finish_reason == Some("tool_calls") {
+                                            debug!("檢測到工具調用完成標誌");
+                                            tool_calls_complete = true;
+                                        }
+                                        
+                                        // 檢查是否包含 tool_calls delta
+                                        let tool_calls_delta = json
+                                            .get("choices")
+                                            .and_then(|choices| choices.get(0))
+                                            .and_then(|choice| choice.get("delta"))
+                                            .and_then(|delta| delta.get("tool_calls"));
+                                            
+                                        if let Some(tool_calls_array) = tool_calls_delta {
+                                            debug!("檢測到工具調用 delta");
+                                            
+                                            // 處理每個工具調用的 delta
+                                            if let Some(tool_calls) = tool_calls_array.as_array() {
+                                                for tool_call_delta in tool_calls {
+                                                    let index = tool_call_delta
+                                                        .get("index")
+                                                        .and_then(Value::as_u64)
+                                                        .unwrap_or(0) as usize;
+                                                        
+                                                    // 確保 accumulated_tool_calls 有足夠的元素
+                                                    while accumulated_tool_calls.len() <= index {
+                                                        accumulated_tool_calls.push(AccumulatedToolCall::default());
+                                                    }
+                                                    
+                                                    // 更新 id 和 type
+                                                    if let Some(id) = tool_call_delta.get("id").and_then(Value::as_str) {
+                                                        accumulated_tool_calls[index].id = id.to_string();
+                                                    }
+                                                    
+                                                    if let Some(type_str) = tool_call_delta.get("type").and_then(Value::as_str) {
+                                                        accumulated_tool_calls[index].r#type = type_str.to_string();
+                                                    }
+                                                    
+                                                    // 更新 function 相關欄位
+                                                    if let Some(function) = tool_call_delta.get("function") {
+                                                        if let Some(name) = function.get("name").and_then(Value::as_str) {
+                                                            accumulated_tool_calls[index].function_name = name.to_string();
+                                                        }
+                                                        
+                                                        if let Some(args) = function.get("arguments").and_then(Value::as_str) {
+                                                            accumulated_tool_calls[index].function_arguments.push_str(args);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // 如果工具調用完成，則創建並發送 EventResponse
+                                            if tool_calls_complete && !accumulated_tool_calls.is_empty() {
+                                                let complete_tool_calls = accumulated_tool_calls
+                                                    .iter()
+                                                    .filter(|tc| !tc.id.is_empty() && !tc.function_name.is_empty())
+                                                    .map(|tc| ToolCall {
+                                                        id: tc.id.clone(),
+                                                        r#type: tc.r#type.clone(),
+                                                        function: ToolCallFunction {
+                                                            name: tc.function_name.clone(),
+                                                            arguments: tc.function_arguments.clone(),
+                                                        },
+                                                    })
+                                                    .collect::<Vec<ToolCall>>();
+                                                    
+                                                if !complete_tool_calls.is_empty() {
+                                                    debug!("發送完整的工具調用，數量: {}", complete_tool_calls.len());
+                                                    events.push(Ok(EventResponse {
+                                                        event: EventType::Json,
+                                                        data: None,
+                                                        error: None,
+                                                        tool_calls: Some(complete_tool_calls),
+                                                    }));
+                                                    
+                                                    // 重置累積狀態
+                                                    accumulated_tool_calls.clear();
+                                                    tool_calls_complete = false;
+                                                }
+                                            }
+                                        } else {
+                                            // 如果沒有 tool_calls delta，則按一般 JSON 處理
+                                            events.push(Ok(EventResponse {
+                                                event: EventType::Json,
+                                                data: Some(PartialResponse {
+                                                    text: line.to_string(),
+                                                }),
+                                                error: None,
+                                                tool_calls: None,
+                                            }));
+                                        }
+                                        is_collecting_data = false;
+                                        current_event = None;
+                                    }
+                                },
+                                EventType::Done | EventType::Error => {
+                                    // 這些事件類型不應該有累積的數據
                                     is_collecting_data = false;
-                                    current_event = None;
                                 }
                             }
                         }
+                    }
+                }
+                
+                // 在處理完 chunk 中的所有行之後，檢查是否需要發送最終的 tool_calls 事件
+                if tool_calls_complete && !accumulated_tool_calls.is_empty() {
+                    let complete_tool_calls = accumulated_tool_calls
+                        .iter()
+                        .filter(|tc| !tc.id.is_empty() && !tc.function_name.is_empty())
+                        .map(|tc| ToolCall {
+                            id: tc.id.clone(),
+                            r#type: tc.r#type.clone(),
+                            function: ToolCallFunction {
+                                name: tc.function_name.clone(),
+                                arguments: tc.function_arguments.clone(),
+                            },
+                        })
+                        .collect::<Vec<ToolCall>>();
+                        
+                    if !complete_tool_calls.is_empty() {
+                        debug!("發送最終的完整工具調用，數量: {}", complete_tool_calls.len());
+                        events.push(Ok(EventResponse {
+                            event: EventType::Json, // 仍然是 Json 事件，但包含完整的 tool_calls
+                            data: None,
+                            error: None,
+                            tool_calls: Some(complete_tool_calls),
+                        }));
+                        
+                        // 重置狀態
+                        accumulated_tool_calls.clear();
+                        tool_calls_complete = false;
                     }
                 }
                 
@@ -191,6 +430,23 @@ impl PoeClient {
         });
 
         Ok(Box::pin(stream))
+    }
+
+    pub async fn send_tool_results(
+        &self,
+        original_request: QueryRequest,
+        tool_calls: Vec<ToolCall>,
+        tool_results: Vec<ToolResult>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<EventResponse, PoeError>> + Send>>, PoeError> {
+        debug!("發送工具調用結果，bot_name: {}", self.bot_name);
+        
+        // 創建包含工具結果的新請求
+        let mut request = original_request;
+        request.tool_calls = Some(tool_calls);
+        request.tool_results = Some(tool_results);
+        
+        // 發送請求並處理響應
+        self.stream_request(request).await
     }
 }
 

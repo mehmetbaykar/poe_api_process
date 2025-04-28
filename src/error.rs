@@ -19,4 +19,13 @@ pub enum PoeError {
 
     #[error("事件解析失敗: {0}")]
     EventParseFailed(String),
+
+    #[error("工具調用解析失敗: {0}")]
+    ToolCallParseFailed(String),
+
+    #[error("工具結果解析失敗: {0}")]
+    ToolResultParseFailed(String),
+
+    #[error("缺少必要的工具調用 ID: {0}")]
+    MissingToolCallId(String),
 }
