@@ -1,39 +1,30 @@
 # Poe API Process
+[[English](https://github.com/jeromeleong/poe_api_process/blob/master/README_EN.md)|[繁體中文](https://github.com/jeromeleong/poe_api_process/blob/master/README.md)|[简体中文]]
 
-[[English](https://github.com/jeromeleong/poe_api_process/blob/master/README_EN.md)|[繁體中文](https://github.com/jeromeleong/poe_api_process/blob/master/README.md)|[简体中文](https://github.com/jeromeleong/poe_api_process/blob/master/README_CN.md)]
-
-這是一個用 Rust 實現的 Poe API 客戶端庫。它允許您與 Poe API 平台進行互動，發送查詢請求並接收回應。
+这是一个用 Rust 实现的 Poe API 客户端库。它允许您与 Poe API 平台进行交互，发送查询请求并接收响应。
 
 ## 功能
+- 流式接收 bot 响应
+- 获取可用模型列表
+- 支持工具调用 (Tool Calls)
+- 支持文件上传与附件传送
 
-- 流式接收 bot 回應
-- 獲取可用模型列表
-- 支援工具調用 (Tool Calls)
-- 支援檔案上傳與附件傳送
-
-## 安裝
-
-在您的 `Cargo.toml` 文件中添加以下依賴：
-
+## 安装
+在您的 `Cargo.toml` 文件中添加以下依赖：
 ```toml
 [dependencies]
 poe_api_process = "0.2.0"
 ```
-
-或使用 cargo 指令添加：
-
+或使用 cargo 命令添加：
 ```bash
 cargo add poe_api_process
 ```
 
 ## 使用方法
-
-### 創建客戶端並發送請求
-
+### 创建客户端并发送请求
 ```rust
 use poe_api_process::{PoeClient, ChatRequest, ChatMessage, ChatEventType};
 use futures_util::StreamExt;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
@@ -73,29 +64,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ChatEventType::ReplaceResponse => {
                     if let Some(data) = event.data {
                         if let crate::types::ChatResponseData::Text { text } = data {
-                            println!("替換回應: {}", text);
+                            println!("替换响应: {}", text);
                         }
                     }
                 },
                 ChatEventType::Error => {
                     if let Some(data) = event.data {
                         if let crate::types::ChatResponseData::Error { text, allow_retry } = data {
-                            eprintln!("伺服器錯誤: {}", text);
+                            eprintln!("服务器错误: {}", text);
                             if allow_retry {
-                                println!("可以重試請求");
+                                println!("可以重试请求");
                             }
                         }
                     }
                 },
                 ChatEventType::Done => {
-                    println!("對話完成");
+                    println!("对话完成");
                     break;
                 },
                 ChatEventType::Json => {
                     println!("收到 JSON 事件");
                 },
             },
-            Err(e) => eprintln!("錯誤: {}", e),
+            Err(e) => eprintln!("错误: {}", e),
         }
     }
     
@@ -103,53 +94,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### 工具調用 (Tool Call)
+### 工具调用 (Tool Call)
+- **工具调用 (Tool Call)**: 允许 AI 模型请求执行特定的工具或函数。例如，AI 可能需要查询天气、搜索网页或执行计算等操作。
+- **工具结果 (Tool Result)**: 工具执行后返回的结果，将被发送回 AI 模型以继续对话。
 
-- **工具調用 (Tool Call)**: 允許 AI 模型請求執行特定的工具或函數。例如，AI 可能需要查詢天氣、搜索網頁或執行計算等操作。
-- **工具結果 (Tool Result)**: 工具執行後返回的結果，將被發送回 AI 模型以繼續對話。
-
-在建立請求時，可以指定可用的工具：
-
+在建立请求时，可以指定可用的工具：
 ```rust
 use serde_json::json;
 use poe_api_process::{ChatTool, FunctionDefinition, FunctionParameters};
-
 let request = ChatRequest {
-    // 其他欄位...
+    // 其他字段...
     tools: Some(vec![ChatTool {
         r#type: "function".to_string(),
         function: FunctionDefinition {
             name: "get_weather".to_string(),
-            description: "獲取指定城市的天氣資訊".to_string(),
+            description: "获取指定城市的天气信息".to_string(),
             parameters: FunctionParameters {
                 r#type: "object".to_string(),
                 properties: json!({
                     "city": {
                         "type": "string",
-                        "description": "城市名稱"
+                        "description": "城市名称"
                     }
                 }),
                 required: vec!["city".to_string()],
             },
         },
     }]),
-    // 其他欄位...
+    // 其他字段...
 };
 ```
 
-當 AI 模型返回工具調用時，您可以處理並提供結果：
-
+当 AI 模型返回工具调用时，您可以处理并提供结果：
 ```rust
 use poe_api_process::{ChatToolResult, ChatResponseData};
-
 while let Some(response) = stream.next().await {
     match response {
         Ok(event) => match event.event {
             ChatEventType::Json => {
                 if let Some(ChatResponseData::ToolCalls(tool_calls)) = event.data {
-                    println!("收到工具調用請求: {:?}", tool_calls);
+                    println!("收到工具调用请求: {:?}", tool_calls);
                     
-                    // 處理工具調用
+                    // 处理工具调用
                     let tool_results = vec![ChatToolResult {
                         role: "tool".to_string(),
                         tool_call_id: tool_calls[0].id.clone(),
@@ -157,71 +143,63 @@ while let Some(response) = stream.next().await {
                         content: r#"{"temperature": 25, "condition": "晴天"}"#.to_string(),
                     }];
                     
-                    // 發送工具結果回 AI
+                    // 发送工具结果回 AI
                     let mut result_stream = client.send_tool_results(
                         request.clone(),
                         tool_calls,
                         tool_results
                     ).await?;
                     
-                    // 處理後續回應...
+                    // 处理后续响应...
                     while let Some(result_response) = result_stream.next().await {
-                        // 處理回應...
+                        // 处理响应...
                     }
                 }
             },
-            // 其他事件處理...
+            // 其他事件处理...
         },
-        Err(e) => eprintln!("錯誤: {}", e),
+        Err(e) => eprintln!("错误: {}", e),
     }
 }
 ```
 
-### 檔案上傳與使用附件
-
-本庫支援上傳本地或遠端檔案，並在請求中附加這些檔案：
-
+### 文件上传与使用附件
+本库支持上传本地或远程文件，并在请求中附加这些文件：
 ```rust
 use poe_api_process::{Attachment, FileUploadRequest};
-
-// 上傳單個本地檔案
+// 上传单个本地文件
 let upload_result = client.upload_local_file("path/to/document.pdf").await?;
-println!("檔案已上傳，URL: {}", upload_result.attachment_url);
-
-// 上傳遠端檔案 (通過 URL)
+println!("文件已上传，URL: {}", upload_result.attachment_url);
+// 上传远程文件 (通过 URL)
 let remote_upload = client.upload_remote_file("https://example.com/document.pdf").await?;
-
-// 批次上傳多個檔案
+// 批量上传多个文件
 let batch_results = client.upload_files_batch(vec![
     FileUploadRequest::LocalFile { file: "path/to/first.pdf".to_string() },
     FileUploadRequest::RemoteFile { download_url: "https://example.com/second.pdf".to_string() },
 ]).await?;
-
-// 在請求中附加檔案
+// 在请求中附加文件
 let request = ChatRequest {
-    // 其他欄位...
+    // 其他字段...
     query: vec![ChatMessage {
         role: "user".to_string(),
-        content: "請分析這份文件".to_string(),
+        content: "请分析这份文档".to_string(),
         content_type: "text/markdown".to_string(),
         attachments: Some(vec![Attachment {
             url: upload_result.attachment_url,
             content_type: upload_result.mime_type,
         }]),
     }],
-    // 其他欄位...
+    // 其他字段...
 };
 ```
 
-### 獲取可用模型列表
-
+### 获取可用模型列表
 ```rust
 use poe_api_process::get_model_list;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 獲取繁體中文版的模型列表
-    let models = get_model_list(Some("zh-Hant")).await?;
+    // 获取简体中文版的模型列表
+    let models = get_model_list(Some("zh-Hans")).await?;
     
     println!("可用模型列表:");
     for (index, model) in models.data.iter().enumerate() {
@@ -232,18 +210,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## 除錯功能
-
-啟用 trace 功能可以獲得詳細的日誌輸出：
-
+## 调试功能
+启用 trace 功能可以获得详细的日志输出：
 ```toml
 [dependencies]
 poe_api_process = { version = "0.2.0", features = ["trace"] }
 ```
 
-## 注意事項
-
-- 請確保您擁有可使用的 [Poe API 訪問密鑰](https://poe.com/api_key)。
-- 使用 `stream_request` 時，請提供有效的 bot 名稱和訪問密鑰。
-- `get_model_list` 不需要訪問密鑰，可以直接使用。
-- 檔案上傳功能受到 Poe 平台的檔案大小和類型限制。
+## 注意事项
+- 请确保您拥有可使用的 [Poe API 访问密钥](https://poe.com/api_key)。
+- 使用 `stream_request` 时，请提供有效的 bot 名称和访问密钥。
+- `get_model_list` 不需要访问密钥，可以直接使用。
+- 文件上传功能受到 Poe 平台的文件大小和类型限制。

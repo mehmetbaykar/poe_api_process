@@ -5,6 +5,6 @@ pub mod types;
 #[cfg(test)]
 pub mod test;
 
-pub use client::{get_model_list, PoeClient};
+pub use client::{PoeClient, get_model_list};
 pub use error::PoeError;
 pub use types::*;

@@ -28,4 +28,23 @@ pub enum PoeError {
 
     #[error("缺少必要的工具調用 ID: {0}")]
     MissingToolCallId(String),
+
+    // 新增文件上傳相關錯誤
+    #[error("文件不存在: {0}")]
+    FileNotFound(String),
+
+    #[error("文件讀取失敗: {0}")]
+    FileReadError(#[from] std::io::Error),
+
+    #[error("文件上傳失敗: {0}")]
+    FileUploadFailed(String),
+
+    #[error("不支持的文件類型: {0}")]
+    UnsupportedFileType(String),
+
+    #[error("文件過大: {0}")]
+    FileTooLarge(String),
+
+    #[error("無效的URL: {0}")]
+    InvalidUrl(#[from] url::ParseError),
 }
