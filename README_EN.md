@@ -184,7 +184,7 @@ This library supports uploading local or remote files and attaching them to requ
 use poe_api_process::{Attachment, FileUploadRequest};
 
 // Upload a single local file
-let upload_result = client.upload_local_file("path/to/document.pdf").await?;
+let upload_result = client.upload_local_file("path/to/document.pdf", mime_type: None).await?;
 println!("File uploaded, URL: {}", upload_result.attachment_url);
 
 // Upload a remote file (via URL)
@@ -192,7 +192,7 @@ let remote_upload = client.upload_remote_file("https://example.com/document.pdf"
 
 // Batch upload multiple files
 let batch_results = client.upload_files_batch(vec![
-    FileUploadRequest::LocalFile { file: "path/to/first.pdf".to_string() },
+    FileUploadRequest::LocalFile { file: "path/to/first.pdf".to_string() , mime_type: None},
     FileUploadRequest::RemoteFile { download_url: "https://example.com/second.pdf".to_string() },
 ]).await?;
 

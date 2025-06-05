@@ -168,13 +168,13 @@ while let Some(response) = stream.next().await {
 ```rust
 use poe_api_process::{Attachment, FileUploadRequest};
 // 上传单个本地文件
-let upload_result = client.upload_local_file("path/to/document.pdf").await?;
+let upload_result = client.upload_local_file("path/to/document.pdf", mime_type: None).await?;
 println!("文件已上传，URL: {}", upload_result.attachment_url);
 // 上传远程文件 (通过 URL)
 let remote_upload = client.upload_remote_file("https://example.com/document.pdf").await?;
 // 批量上传多个文件
 let batch_results = client.upload_files_batch(vec![
-    FileUploadRequest::LocalFile { file: "path/to/first.pdf".to_string() },
+    FileUploadRequest::LocalFile { file: "path/to/first.pdf".to_string() , mime_type: None},
     FileUploadRequest::RemoteFile { download_url: "https://example.com/second.pdf".to_string() },
 ]).await?;
 // 在请求中附加文件

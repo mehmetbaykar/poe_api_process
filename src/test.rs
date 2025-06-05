@@ -428,25 +428,21 @@ async fn test_file_upload() {
     let access_key = get_access_key();
     debug!("建立 PoeClient 測試實例，用於檔案上傳測試");
     let client = PoeClient::new("Claude-3.7-Sonnet", &access_key);
-
     // 創建一個臨時文件用於測試
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
-
     let temp_dir = tempdir().expect("無法創建臨時目錄");
     let file_path = temp_dir.path().join("test_upload.txt");
     let file_path_str = file_path.to_str().unwrap().to_string();
-
     debug!("創建臨時測試文件: {}", file_path_str);
     {
         let mut file = File::create(&file_path).expect("無法創建臨時文件");
         writeln!(file, "這是一個測試上傳文件的內容").expect("無法寫入臨時文件");
     }
-
     // 測試本地文件上傳
     debug!("開始測試本地文件上傳");
-    let upload_result = client.upload_local_file(&file_path_str).await;
+    let upload_result = client.upload_local_file(&file_path_str, None).await;
     match &upload_result {
         Ok(response) => {
             debug!("文件上傳成功，附件URL: {}", response.attachment_url);
@@ -455,7 +451,6 @@ async fn test_file_upload() {
         }
         Err(e) => warn!("文件上傳失敗: {}", e),
     }
-
     assert!(upload_result.is_ok(), "本地文件上傳應該成功");
     if let Ok(response) = upload_result {
         assert!(!response.attachment_url.is_empty(), "附件URL不應為空");
@@ -466,23 +461,21 @@ async fn test_file_upload() {
         );
         assert!(response.size.unwrap() > 0, "文件大小應大於0");
     }
-
     // 測試批量上傳
     debug!("開始測試批量上傳");
     let batch_upload_requests = vec![
         FileUploadRequest::LocalFile {
             file: file_path_str.clone(),
+            mime_type: None,
         },
         // 可以添加遠程文件測試，但需要有效URL
         // FileUploadRequest::RemoteFile { download_url: "https://example.com/sample.txt".to_string() },
     ];
-
     let batch_result = client.upload_files_batch(batch_upload_requests).await;
     match &batch_result {
         Ok(responses) => debug!("批量上傳成功，共 {} 個文件", responses.len()),
         Err(e) => warn!("批量上傳失敗: {}", e),
     }
-
     assert!(batch_result.is_ok(), "批量上傳應該成功");
     if let Ok(responses) = batch_result {
         assert!(!responses.is_empty(), "應該至少上傳一個文件");
@@ -491,14 +484,12 @@ async fn test_file_upload() {
             "批量上傳的附件URL不應為空"
         );
     }
-
     // 測試帶附件的消息發送
     debug!("開始測試帶附件的消息發送");
     let file_upload_response = client
-        .upload_local_file(&file_path_str)
+        .upload_local_file(&file_path_str, None)
         .await
         .expect("文件上傳失敗");
-
     let request = ChatRequest {
         version: "1.1".to_string(),
         r#type: "query".to_string(),
@@ -521,14 +512,12 @@ async fn test_file_upload() {
         logit_bias: None,
         stop_sequences: None,
     };
-
     debug!("發送帶附件的消息請求");
     let result = client.stream_request(request).await;
     match &result {
         Ok(_) => debug!("帶附件的消息請求成功"),
         Err(e) => warn!("帶附件的消息請求失敗: {}", e),
     }
-
     assert!(result.is_ok(), "帶附件的消息請求應該成功");
     if let Ok(mut stream) = result {
         let mut received_response = false;
@@ -553,17 +542,15 @@ async fn test_file_upload() {
         }
         assert!(received_response, "應該收到至少一個帶附件消息的回應");
     }
-
     // 測試無效的文件路徑
     debug!("開始測試無效的文件路徑");
     let invalid_path = "不存在的文件路徑.txt";
-    let invalid_result = client.upload_local_file(invalid_path).await;
+    let invalid_result = client.upload_local_file(invalid_path, None).await;
     match &invalid_result {
         Ok(_) => warn!("上傳不存在的文件卻成功了，這不符合預期"),
         Err(e) => debug!("如預期般，上傳不存在的文件失敗: {}", e),
     }
     assert!(invalid_result.is_err(), "上傳不存在的文件應該失敗");
-
     // 清理臨時文件
     debug!("測試完成，清理臨時文件");
     temp_dir.close().expect("無法清理臨時目錄");

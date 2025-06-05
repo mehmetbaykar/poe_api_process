@@ -530,10 +530,16 @@ impl PoeClient {
     }
 
     /// 上傳本地檔案
-    pub async fn upload_local_file(&self, file_path: &str) -> Result<FileUploadResponse, PoeError> {
+    pub async fn upload_local_file(
+        &self,
+        file_path: &str,
+        mime_type: Option<&str>,
+    ) -> Result<FileUploadResponse, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("開始上傳本地檔案: {}", file_path);
-
+        debug!(
+            "開始上傳本地檔案: {} | MIME 類型: {:?}",
+            file_path, mime_type
+        );
         // 檢查檔案是否存在
         let path = Path::new(file_path);
         if !path.exists() {
@@ -541,14 +547,20 @@ impl PoeClient {
             warn!("檔案不存在: {}", file_path);
             return Err(PoeError::FileNotFound(file_path.to_string()));
         }
-
+        
+        // 簡化 MIME 類型處理：如果有提供 mime_type 就使用，否則使用預設值
+        let content_type = mime_type.unwrap_or("application/octet-stream").to_string();
+        
+        #[cfg(feature = "trace")]
+        debug!("使用 MIME 類型: {}", content_type);
+        
         // 建立 multipart 表單
         let file = tokio::fs::File::open(path).await.map_err(|e| {
             #[cfg(feature = "trace")]
             warn!("無法開啟檔案: {}", e);
             PoeError::FileReadError(e)
         })?;
-
+        
         let file_part =
             reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(ReaderStream::new(file)))
                 .file_name(
@@ -556,10 +568,16 @@ impl PoeClient {
                         .and_then(|name| name.to_str())
                         .unwrap_or("file")
                         .to_string(),
-                );
-
+                )
+                .mime_str(&content_type)
+                .map_err(|e| {
+                    #[cfg(feature = "trace")]
+                    warn!("設置 MIME 類型失敗: {}", e);
+                    PoeError::FileUploadFailed(format!("設置 MIME 類型失敗: {}", e))
+                })?;
+                
         let form = reqwest::multipart::Form::new().part("file", file_part);
-
+            
         // 發送請求
         self.send_upload_request(form).await
     }
@@ -599,10 +617,14 @@ impl PoeClient {
 
         for file_request in files {
             let task = match file_request {
-                FileUploadRequest::LocalFile { file } => {
+                FileUploadRequest::LocalFile { file, mime_type } => {
                     let client = self.clone();
                     let file_path = file.clone();
-                    tokio::spawn(async move { client.upload_local_file(&file_path).await })
+                    tokio::spawn(async move {
+                        client
+                            .upload_local_file(&file_path, mime_type.as_deref())
+                            .await
+                    })
                 }
                 FileUploadRequest::RemoteFile { download_url } => {
                     let client = self.clone();

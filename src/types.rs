@@ -156,8 +156,13 @@ pub struct ModelInfo {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FileUploadRequest {
-    LocalFile { file: String },
-    RemoteFile { download_url: String },
+    LocalFile {
+        file: String,
+        mime_type: Option<String>,
+    },
+    RemoteFile {
+        download_url: String,
+    },
 }
 
 // 文件上傳響應結構
