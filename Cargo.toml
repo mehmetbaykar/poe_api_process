@@ -1,17 +1,17 @@
 [package]
 name = "poe_api_process"
-version = "0.2.1"
+version = "0.1.0"
 edition = "2024"
 publish = ["crates-io"]
-authors = ["Jerome Leong <jeromeleong1998@gmail.com>"]
+authors = ["Mehmet Baykar se.mehmet.baykar@gmail.com"]
 description = "Poe API for rust"
-repository = "https://github.com/jeromeleong/poe_api_process"
+repository = "https://github.com/mehmetbaykar/poe_api_process"
 license = "MIT"
 keywords = ["poeapi", "ai"]
 categories = ["api-bindings"]
 
 [features]
-trace = []
+trace = ["dep:tracing-subscriber"]
 
 [dependencies]
 reqwest = { version = "0.12.19", features = ["json", "stream", "multipart"] }
@@ -23,6 +23,7 @@ futures-util = "0.3.31"
 thiserror = "2.0.12"
 bytes = "1.10.1"
 tracing = { version = "0.1.41", features = ["async-await"] }
+tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter", "fmt"] }
 url = "2.5.4"
 
 [dev-dependencies]
@@ -30,3 +31,4 @@ test-log = { version = "0.2.17", features = ["trace"] }
 dotenvy = "0.15.7"
 env_logger = "0.11.8"
 tempfile = "3.20.0"
+

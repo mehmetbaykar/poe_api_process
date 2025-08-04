@@ -1,4 +1,36 @@
-/target
+# Rust
+/target/
 Cargo.lock
+**/*.rs.bk
+
+# Environment files
 .env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test outputs
+test-results/
+coverage/
+
+# Temporary files
+*.tmp
+temp/
+tmp/
+
+# API keys and secrets
+*.key
+*.pem
+secrets/

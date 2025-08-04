@@ -1,34 +1,70 @@
-# Poe API Process
+# poe_api_process
 
-[[English](https://github.com/jeromeleong/poe_api_process/blob/master/README_EN.md)|[繁體中文](https://github.com/jeromeleong/poe_api_process/blob/master/README.md)|[简体中文](https://github.com/jeromeleong/poe_api_process/blob/master/README_CN.md)]
+[![Crates.io](https://img.shields.io/crates/v/poe_api_process.svg)](https://crates.io/crates/poe_api_process)
+[![Documentation](https://docs.rs/poe_api_process/badge.svg)](https://docs.rs/poe_api_process)
+[![License](https://img.shields.io/crates/l/poe_api_process.svg)](LICENSE)
 
-這是一個用 Rust 實現的 Poe API 客戶端庫。它允許您與 Poe API 平台進行互動，發送查詢請求並接收回應。
+A Rust client library for interacting with the Poe.com API, providing streaming responses, tool calls support, and file upload capabilities.
 
-## 功能
+## Features
 
-- 流式接收 bot 回應
-- 獲取可用模型列表
-- 支援工具調用 (Tool Calls)
-- 支援檔案上傳與附件傳送
+- 🚀 **Streaming Responses** - Real-time streaming of bot responses using Server-Sent Events (SSE)
+- 🛠️ **Tool Calls** - Full support for function calling with streaming tool call accumulation
+- 📁 **File Uploads** - Upload local files, remote files via URL, or batch upload multiple files
+- 🤖 **Multiple Bot Support** - Works with any bot available on Poe.com
+- 🔍 **Model Discovery** - Query available models/bots dynamically
+- 🦀 **Type Safety** - Fully typed API with comprehensive error handling
+- 🔒 **Secure** - Uses secure HTTPS connections with proper authentication
 
-## 安裝
+## Installation
 
-在您的 `Cargo.toml` 文件中添加以下依賴：
+Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-poe_api_process = "0.2.0"
+poe_api_process = "0.1.0"
 ```
 
-或使用 cargo 指令添加：
+Or use cargo:
 
 ```bash
 cargo add poe_api_process
 ```
 
-## 使用方法
+### With Debug Logging
 
-### 創建客戶端並發送請求
+To enable debug logging, add the `trace` feature:
+
+```toml
+[dependencies]
+poe_api_process = { version = "0.1.0", features = ["trace"] }
+```
+
+## Logging
+
+The library supports configurable debug logging through the `tracing` crate. When the `trace` feature is enabled, you can control logging output using environment variables or programmatically.
+
+### Environment-based Configuration
+
+```rust
+// Initialize logging with RUST_LOG environment variable
+#[cfg(feature = "trace")]
+poe_api_process::init_tracing();
+
+// Set environment variable before running:
+// RUST_LOG=debug cargo run
+// RUST_LOG=poe_api_process=trace cargo run
+```
+
+### Programmatic Configuration
+
+```rust
+// Initialize with custom filter
+#[cfg(feature = "trace")]
+poe_api_process::init_tracing_with_filter("poe_api_process=debug,reqwest=info");
+```
+
+## Quick Start
 
 ```rust
 use poe_api_process::{PoeClient, ChatRequest, ChatMessage, ChatEventType};
@@ -36,28 +72,33 @@ use futures_util::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
+    // Create a client with your bot and access key
+    let client = PoeClient::new("Llama-4-Scout", "your_access_key");
     
+    // Create a chat request
     let request = ChatRequest {
         version: "1.1".to_string(),
         r#type: "query".to_string(),
         query: vec![ChatMessage {
             role: "user".to_string(),
-            content: "你好".to_string(),
+            content: "Hello, how are you?".to_string(),
             content_type: "text/markdown".to_string(),
             attachments: None,
         }],
-        temperature: None,
-        user_id: String::new(),
-        conversation_id: String::new(),
-        message_id: String::new(),
+        // Required fields (use unique IDs in production)
+        user_id: "user123".to_string(),
+        conversation_id: "conv123".to_string(),
+        message_id: "msg123".to_string(),
+        // Optional fields
         tools: None,
         tool_calls: None,
         tool_results: None,
+        temperature: None,
         logit_bias: None,
         stop_sequences: None,
     };
     
+    // Stream the response
     let mut stream = client.stream_request(request).await?;
     
     while let Some(response) = stream.next().await {
@@ -66,36 +107,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ChatEventType::Text => {
                     if let Some(data) = event.data {
                         if let crate::types::ChatResponseData::Text { text } = data {
-                            println!("收到文字: {}", text);
-                        }
-                    }
-                },
-                ChatEventType::ReplaceResponse => {
-                    if let Some(data) = event.data {
-                        if let crate::types::ChatResponseData::Text { text } = data {
-                            println!("替換回應: {}", text);
-                        }
-                    }
-                },
-                ChatEventType::Error => {
-                    if let Some(data) = event.data {
-                        if let crate::types::ChatResponseData::Error { text, allow_retry } = data {
-                            eprintln!("伺服器錯誤: {}", text);
-                            if allow_retry {
-                                println!("可以重試請求");
-                            }
+                            print!("{}", text);
                         }
                     }
                 },
                 ChatEventType::Done => {
-                    println!("對話完成");
+                    println!("\nConversation complete");
                     break;
                 },
-                ChatEventType::Json => {
-                    println!("收到 JSON 事件");
-                },
+                _ => {}
             },
-            Err(e) => eprintln!("錯誤: {}", e),
+            Err(e) => eprintln!("Error: {}", e),
         }
     }
     
@@ -103,147 +125,259 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### 工具調用 (Tool Call)
+## API Reference
 
-- **工具調用 (Tool Call)**: 允許 AI 模型請求執行特定的工具或函數。例如，AI 可能需要查詢天氣、搜索網頁或執行計算等操作。
-- **工具結果 (Tool Result)**: 工具執行後返回的結果，將被發送回 AI 模型以繼續對話。
+### Client Creation
 
-在建立請求時，可以指定可用的工具：
+```rust
+let client = PoeClient::new("bot_name", "access_key");
+```
+
+### Streaming Responses
+
+The library provides real-time streaming of bot responses:
+
+```rust
+let mut stream = client.stream_request(request).await?;
+
+while let Some(response) = stream.next().await {
+    // Handle each streaming event
+}
+```
+
+### Event Types
+
+The library supports the following event types:
+
+- `ChatEventType::Text` - Incremental text response
+- `ChatEventType::ReplaceResponse` - Replace the entire response
+- `ChatEventType::Json` - JSON data (including tool calls)
+- `ChatEventType::File` - File attachments in response
+- `ChatEventType::Done` - Conversation complete
+- `ChatEventType::Error` - Error occurred
+
+### Tool Calls (Function Calling)
+
+Define available tools and handle tool calls:
 
 ```rust
 use serde_json::json;
 use poe_api_process::{ChatTool, FunctionDefinition, FunctionParameters};
 
-let request = ChatRequest {
-    // 其他欄位...
-    tools: Some(vec![ChatTool {
-        r#type: "function".to_string(),
-        function: FunctionDefinition {
-            name: "get_weather".to_string(),
-            description: "獲取指定城市的天氣資訊".to_string(),
-            parameters: FunctionParameters {
-                r#type: "object".to_string(),
-                properties: json!({
-                    "city": {
-                        "type": "string",
-                        "description": "城市名稱"
-                    }
-                }),
-                required: vec!["city".to_string()],
-            },
-        },
-    }]),
-    // 其他欄位...
-};
-```
-
-當 AI 模型返回工具調用時，您可以處理並提供結果：
-
-```rust
-use poe_api_process::{ChatToolResult, ChatResponseData};
-
-while let Some(response) = stream.next().await {
-    match response {
-        Ok(event) => match event.event {
-            ChatEventType::Json => {
-                if let Some(ChatResponseData::ToolCalls(tool_calls)) = event.data {
-                    println!("收到工具調用請求: {:?}", tool_calls);
-                    
-                    // 處理工具調用
-                    let tool_results = vec![ChatToolResult {
-                        role: "tool".to_string(),
-                        tool_call_id: tool_calls[0].id.clone(),
-                        name: tool_calls[0].function.name.clone(),
-                        content: r#"{"temperature": 25, "condition": "晴天"}"#.to_string(),
-                    }];
-                    
-                    // 發送工具結果回 AI
-                    let mut result_stream = client.send_tool_results(
-                        request.clone(),
-                        tool_calls,
-                        tool_results
-                    ).await?;
-                    
-                    // 處理後續回應...
-                    while let Some(result_response) = result_stream.next().await {
-                        // 處理回應...
-                    }
+// Define a tool
+let weather_tool = ChatTool {
+    r#type: "function".to_string(),
+    function: FunctionDefinition {
+        name: "get_weather".to_string(),
+        description: "Get weather information for a location".to_string(),
+        parameters: FunctionParameters {
+            r#type: "object".to_string(),
+            properties: json!({
+                "location": {
+                    "type": "string",
+                    "description": "City name"
                 }
-            },
-            // 其他事件處理...
+            }),
+            required: vec!["location".to_string()],
         },
-        Err(e) => eprintln!("錯誤: {}", e),
+    },
+};
+
+// Include in request
+let request = ChatRequest {
+    tools: Some(vec![weather_tool]),
+    // ... other fields
+};
+
+// Handle tool calls in response
+if let ChatEventType::Json = event.event {
+    if let Some(ChatResponseData::ToolCalls(tool_calls)) = event.data {
+        // Process tool calls and send results back
+        let tool_results = vec![ChatToolResult {
+            role: "tool".to_string(),
+            tool_call_id: tool_calls[0].id.clone(),
+            name: tool_calls[0].function.name.clone(),
+            content: r#"{"temperature": 25, "condition": "sunny"}"#.to_string(),
+        }];
+        
+        let result_stream = client.send_tool_results(
+            request.clone(),
+            tool_calls,
+            tool_results
+        ).await?;
     }
 }
 ```
 
-### 檔案上傳與使用附件
+### File Uploads
 
-本庫支援上傳本地或遠端檔案，並在請求中附加這些檔案：
+Upload files and attach them to messages:
 
 ```rust
 use poe_api_process::{Attachment, FileUploadRequest};
 
-// 上傳單個本地檔案
-let upload_result = client.upload_local_file("path/to/document.pdf", mime_type: None).await?;
-println!("檔案已上傳，URL: {}", upload_result.attachment_url);
+// Upload a single local file
+let upload_result = client.upload_local_file("path/to/file.pdf", None).await?;
 
-// 上傳遠端檔案 (通過 URL)
-let remote_upload = client.upload_remote_file("https://example.com/document.pdf").await?;
+// Upload with specific MIME type
+let upload_result = client.upload_local_file("path/to/file.pdf", Some("application/pdf")).await?;
 
-// 批次上傳多個檔案
+// Upload a remote file
+let remote_result = client.upload_remote_file("https://example.com/file.pdf").await?;
+
+// Batch upload multiple files
 let batch_results = client.upload_files_batch(vec![
-    FileUploadRequest::LocalFile { file: "path/to/first.pdf".to_string() , mime_type: None},
-    FileUploadRequest::RemoteFile { download_url: "https://example.com/second.pdf".to_string() },
+    FileUploadRequest::LocalFile { 
+        file: "path/to/file1.pdf".to_string(),
+        mime_type: None 
+    },
+    FileUploadRequest::RemoteFile { 
+        download_url: "https://example.com/file2.pdf".to_string() 
+    },
 ]).await?;
 
-// 在請求中附加檔案
-let request = ChatRequest {
-    // 其他欄位...
-    query: vec![ChatMessage {
-        role: "user".to_string(),
-        content: "請分析這份文件".to_string(),
-        content_type: "text/markdown".to_string(),
-        attachments: Some(vec![Attachment {
-            url: upload_result.attachment_url,
-            content_type: upload_result.mime_type,
-        }]),
-    }],
-    // 其他欄位...
+// Attach to message
+let message = ChatMessage {
+    attachments: Some(vec![Attachment {
+        url: upload_result.attachment_url,
+        content_type: upload_result.mime_type,
+    }]),
+    // ... other fields
 };
 ```
 
-### 獲取可用模型列表
+### Model Discovery
+
+Get available models without authentication:
 
 ```rust
 use poe_api_process::get_model_list;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 獲取繁體中文版的模型列表
-    let models = get_model_list(Some("zh-Hant")).await?;
-    
-    println!("可用模型列表:");
-    for (index, model) in models.data.iter().enumerate() {
-        println!("{}. {}", index + 1, model.id);
-    }
-    
-    Ok(())
+let models = get_model_list(Some("en")).await?;
+for model in models.data {
+    println!("{}: {}", model.id, model.owned_by);
 }
 ```
 
-## 除錯功能
+## Error Handling
 
-啟用 trace 功能可以獲得詳細的日誌輸出：
+The library provides comprehensive error handling with the `PoeError` enum:
+
+```rust
+use poe_api_process::PoeError;
+
+match client.stream_request(request).await {
+    Ok(stream) => { /* handle stream */ },
+    Err(PoeError::RequestFailed(e)) => { /* HTTP error */ },
+    Err(PoeError::BotError(msg)) => { /* Bot-specific error */ },
+    Err(PoeError::FileNotFound(path)) => { /* File doesn't exist */ },
+    // ... other error types
+}
+```
+
+## Debugging
+
+Enable detailed logging with the `trace` feature:
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.2.0", features = ["trace"] }
+poe_api_process = { version = "0.1.0", features = ["trace"] }
 ```
 
-## 注意事項
+Then set the log level:
 
-- 請確保您擁有可使用的 [Poe API 訪問密鑰](https://poe.com/api_key)。
-- 使用 `stream_request` 時，請提供有效的 bot 名稱和訪問密鑰。
-- `get_model_list` 不需要訪問密鑰，可以直接使用。
-- 檔案上傳功能受到 Poe 平台的檔案大小和類型限制。
+```bash
+RUST_LOG=poe_api_process=debug cargo run
+```
+
+## Security
+
+This library is built with security best practices in mind:
+
+### Core Security Features
+- **No Unsafe Code**: The entire codebase uses `#![deny(unsafe_code)]`
+- **Memory Safe**: No `unwrap()` or `expect()` in library code (only in tests)
+- **HTTPS Only**: All API calls use HTTPS with TLS/SSL verification enabled
+- **Input Validation**: Bot names, access keys, URLs, and file paths are validated
+- **Error Handling**: Custom error types that never expose sensitive information like API keys
+
+### Security Guidelines for Users
+1. **API Key Storage**
+   - Store API keys in environment variables or secure vaults
+   - Never commit API keys to version control
+   - Use `.env` files for local development (add to `.gitignore`)
+
+2. **File Operations**
+   - Only upload files from trusted sources
+   - Validate file paths and URLs before passing to the library
+   - Use HTTPS URLs only for remote file uploads
+
+3. **Dependencies**
+   - Keep dependencies updated with `cargo update`
+   - Run `cargo audit` regularly to check for vulnerabilities
+
+## Testing
+
+This library includes comprehensive tests that cover all functionality:
+
+### Test Coverage
+The test suite includes 8 integration tests that verify:
+- **Streaming**: Basic chat requests and response streaming
+- **Model Discovery**: Fetching available models via GraphQL
+- **Tool Calling**: Function calling with proper accumulation
+- **File Uploads**: Both local and remote file handling
+- **Error Handling**: Malformed data and missing file scenarios
+- **Content Parsing**: Proper event and data parsing
+
+### Running Tests
+
+```bash
+# Prerequisites: Set your Poe API key
+echo "POE_ACCESS_KEY=your_p-b_cookie_value" > .env
+
+# Run all tests
+cargo test --features trace
+
+# Run with debug output
+RUST_LOG=poe_api_process=debug cargo test --features trace -- --nocapture
+
+# Run a specific test
+cargo test test_stream_request --features trace -- --nocapture
+
+# Run tests sequentially (recommended for API tests)
+cargo test --features trace -- --test-threads=1
+```
+
+### Getting Your API Key
+1. Go to [poe.com](https://poe.com)
+2. Open Developer Tools (F12)
+3. Go to Storage/Application → Cookies
+4. Find the cookie named `p-b` - this is your access key
+
+### Test Organization
+All tests follow a consistent pattern:
+1. **Setup**: Initialize environment and client
+2. **Arrange**: Prepare the request
+3. **Act**: Make the API call
+4. **Assert**: Verify the results
+5. **Cleanup**: Clean up resources if needed
+
+**Note**: Tests make real API calls to Poe.com, so they require a valid API key and internet connection.
+
+## Requirements
+
+- Rust 1.70 or higher
+- Tokio runtime
+- Valid [Poe API access key](https://poe.com/api_key)
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+## Support
+
+For issues and feature requests, please use the [GitHub issue tracker](https://github.com/mehmetbaykar/poe_api_process/issues).
