@@ -6,9 +6,10 @@ This is a Rust implementation of a Poe API client library. It allows you to inte
 
 ## Features
 - Stream bot responses
-- Get list of available models
+- Get list of available models (supports traditional API and v1/models API)
 - Support for Tool Calls
 - Support for file uploads and attachments
+- Flexible URL configuration
 
 ## Installation
 
@@ -16,7 +17,7 @@ Add this dependency to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
-poe_api_process = "0.2.0"
+poe_api_process = "0.3.0"
 ```
 
 Or use the cargo command:
@@ -35,7 +36,12 @@ use futures_util::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
+    let client = PoeClient::new(
+        "Claude-3.7-Sonnet",
+        "your_access_key",
+        "https://api.poe.com",
+        "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST"
+    );
     
     let request = ChatRequest {
         version: "1.1".to_string(),
@@ -214,6 +220,8 @@ let request = ChatRequest {
 
 ### Get Available Model List
 
+#### Traditional Model List API (no token required)
+
 ```rust
 use poe_api_process::get_model_list;
 
@@ -231,13 +239,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+#### v1/models API (token required)
+
+```rust
+use poe_api_process::PoeClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = PoeClient::new(
+        "Claude-3.7-Sonnet",
+        "your_access_key",
+        "https://api.poe.com",
+        "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST"
+    );
+    
+    // Get v1/models API model list
+    let v1_models = client.get_v1_model_list().await?;
+    
+    println!("v1 API model list:");
+    for (index, model) in v1_models.data.iter().enumerate() {
+        println!("{}. {} (created: {})", index + 1, model.id, model.created);
+    }
+    
+    Ok(())
+}
+```
+
 ## Debug Features
 
 Enable trace functionality for detailed log output:
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.2.0", features = ["trace"] }
+poe_api_process = { version = "0.3.0", features = ["trace"] }
+```
+
+## v0.3.0 Version Changes
+
+### Breaking Changes
+- **PoeClient::new()** now requires four parameters: `bot_name`, `access_key`, `poe_base_url`, `poe_file_upload_url`
+- Added **get_v1_model_list()** method as a PoeClient instance method
+- Automatic URL trailing slash normalization
+
+### Migration Guide
+```rust
+// v0.2.x version
+let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
+
+// v0.3.0 version
+let client = PoeClient::new(
+    "Claude-3.7-Sonnet",
+    "your_access_key",
+    "https://api.poe.com",
+    "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST"
+);
 ```
 
 ## Notes
@@ -245,4 +300,5 @@ poe_api_process = { version = "0.2.0", features = ["trace"] }
 - Ensure you have a usable [Poe API access key](https://poe.com/api_key).
 - When using `stream_request`, provide a valid bot name and access key.
 - `get_model_list` doesn't require an access key and can be used directly.
+- `get_v1_model_list` requires an access key and is called as a PoeClient method.
 - File upload functionality is subject to Poe platform's file size and type limitations.

@@ -54,8 +54,10 @@ pub struct ChatTool {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionDefinition {
     pub name: String,
-    pub description: String,
-    pub parameters: FunctionParameters,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<FunctionParameters>,
 }
 
 // FunctionDefinition 的FunctionParameters 結構

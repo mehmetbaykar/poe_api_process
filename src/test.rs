@@ -41,7 +41,7 @@ async fn test_stream_request() {
     setup();
     let access_key = get_access_key();
     debug!("建立 PoeClient 測試實例");
-    let client = PoeClient::new("Claude-3.7-Sonnet", &access_key);
+    let client = PoeClient::new("Claude-3.7-Sonnet", &access_key, "https://api.poe.com", "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST");
 
     let request = ChatRequest {
         version: "1.1".to_string(),
@@ -135,7 +135,7 @@ async fn test_stream_content_verification() {
     setup();
     let access_key = get_access_key();
     debug!("建立 PoeClient 測試實例");
-    let client = PoeClient::new("Claude-3.7-Sonnet", &access_key);
+    let client = PoeClient::new("Claude-3.7-Sonnet", &access_key, "https://api.poe.com", "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST");
 
     let request = ChatRequest {
         version: "1.1".to_string(),
@@ -215,7 +215,7 @@ async fn test_stream_tool_content_verification() {
     setup();
     let access_key = get_access_key();
     debug!("建立 PoeClient 測試實例進行工具內容測試");
-    let client = PoeClient::new("GPT-4o-Mini", &access_key);
+    let client = PoeClient::new("GPT-4o-Mini", &access_key, "https://api.poe.com", "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST");
 
     // 創建帶有工具定義的請求
     let request = ChatRequest {
@@ -235,8 +235,8 @@ async fn test_stream_tool_content_verification() {
             r#type: "function".to_string(),
             function: FunctionDefinition {
                 name: "get_weather".to_string(),
-                description: "Get weather information for a location".to_string(),
-                parameters: FunctionParameters {
+                description: Some("Get weather information for a location".to_string()),
+                parameters: Some(FunctionParameters {
                     r#type: "object".to_string(),
                     properties: json!({
                         "location": {
@@ -250,7 +250,7 @@ async fn test_stream_tool_content_verification() {
                         }
                     }),
                     required: vec!["location".to_string()],
-                },
+                }),
             },
         }]),
         tool_calls: None,
@@ -427,7 +427,7 @@ async fn test_file_upload() {
     setup();
     let access_key = get_access_key();
     debug!("建立 PoeClient 測試實例，用於檔案上傳測試");
-    let client = PoeClient::new("Claude-3.7-Sonnet", &access_key);
+    let client = PoeClient::new("Claude-3.7-Sonnet", &access_key, "https://api.poe.com", "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST");
     // 創建一個臨時文件用於測試
     use std::fs::File;
     use std::io::Write;
@@ -561,7 +561,7 @@ async fn test_remote_file_upload() {
     setup();
     let access_key = get_access_key();
     debug!("建立 PoeClient 測試實例，用於遠程文件上傳測試");
-    let client = PoeClient::new("Claude-3.7-Sonnet", &access_key);
+    let client = PoeClient::new("Claude-3.7-Sonnet", &access_key, "https://api.poe.com", "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST");
 
     // 使用公開可訪問的測試文件URL
     let test_url = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
@@ -597,4 +597,45 @@ async fn test_remote_file_upload() {
         Err(e) => debug!("如預期般，上傳無效URL失敗: {}", e),
     }
     assert!(invalid_result.is_err(), "上傳無效URL應該失敗");
+}
+
+#[test_log::test(tokio::test)]
+async fn test_get_v1_model_list() {
+    setup();
+    let access_key = get_access_key();
+    debug!("開始測試獲取 v1/models 模型列表");
+    
+    let client = PoeClient::new("Claude-3.7-Sonnet", &access_key, "https://api.poe.com", "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST");
+    let result = client.get_v1_model_list().await;
+
+    match &result {
+        Ok(models) => debug!("成功獲取 v1/models 模型列表，共 {} 個模型", models.data.len()),
+        Err(e) => warn!("獲取 v1/models 模型列表失敗: {}", e),
+    }
+
+    match result {
+        Ok(models) => {
+            assert!(!models.data.is_empty(), "v1/models 模型列表不應為空");
+            debug!("成功獲取 {} 個 v1 模型", models.data.len());
+            
+            // 驗證第一個模型的基本資訊
+            if let Some(first_model) = models.data.first() {
+                assert!(!first_model.id.is_empty(), "模型 ID 不應為空");
+                assert_eq!(first_model.object, "model", "模型類型應為 'model'");
+                assert_eq!(first_model.owned_by, "poe", "模型擁有者應為 'poe'");
+                
+                debug!("第一個 v1 模型資訊：");
+                debug!("ID: {}", first_model.id);
+                debug!("類型: {}", first_model.object);
+                debug!("擁有者: {}", first_model.owned_by);
+                debug!("創建時間: {}", first_model.created);
+            }
+        }
+        Err(e) => {
+            warn!("獲取 v1/models 模型列表失敗: {}", e);
+            panic!("獲取 v1/models 模型列表失敗: {}", e);
+        }
+    }
+
+    debug!("獲取 v1/models 模型列表測試完成");
 }

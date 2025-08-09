@@ -7,9 +7,10 @@
 ## 功能
 
 - 流式接收 bot 回應
-- 獲取可用模型列表
+- 獲取可用模型列表（支援傳統 API 和 v1/models API）
 - 支援工具調用 (Tool Calls)
 - 支援檔案上傳與附件傳送
+- 靈活的 URL 配置
 
 ## 安裝
 
@@ -17,7 +18,7 @@
 
 ```toml
 [dependencies]
-poe_api_process = "0.2.0"
+poe_api_process = "0.3.0"
 ```
 
 或使用 cargo 指令添加：
@@ -36,7 +37,12 @@ use futures_util::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
+    let client = PoeClient::new(
+        "Claude-3.7-Sonnet",
+        "your_access_key",
+        "https://api.poe.com",
+        "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST"
+    );
     
     let request = ChatRequest {
         version: "1.1".to_string(),
@@ -215,6 +221,8 @@ let request = ChatRequest {
 
 ### 獲取可用模型列表
 
+#### 傳統模型列表 API（無需 token）
+
 ```rust
 use poe_api_process::get_model_list;
 
@@ -232,13 +240,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+#### v1/models API（需要 token）
+
+```rust
+use poe_api_process::PoeClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = PoeClient::new(
+        "Claude-3.7-Sonnet",
+        "your_access_key",
+        "https://api.poe.com",
+        "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST"
+    );
+    
+    // 獲取 v1/models API 的模型列表
+    let v1_models = client.get_v1_model_list().await?;
+    
+    println!("v1 API 模型列表:");
+    for (index, model) in v1_models.data.iter().enumerate() {
+        println!("{}. {} (創建時間: {})", index + 1, model.id, model.created);
+    }
+    
+    Ok(())
+}
+```
+
 ## 除錯功能
 
 啟用 trace 功能可以獲得詳細的日誌輸出：
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.2.0", features = ["trace"] }
+poe_api_process = { version = "0.3.0", features = ["trace"] }
+```
+
+## v0.3.0 版本變更
+
+### 重大變更
+- **PoeClient::new()** 現在需要四個參數：`bot_name`、`access_key`、`poe_base_url`、`poe_file_upload_url`
+- 新增 **get_v1_model_list()** 方法作為 PoeClient 的實例方法
+- 自動處理 URL 末尾斜線正規化
+
+### 遷移指南
+```rust
+// v0.2.x 版本
+let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
+
+// v0.3.0 版本
+let client = PoeClient::new(
+    "Claude-3.7-Sonnet",
+    "your_access_key",
+    "https://api.poe.com",
+    "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST"
+);
 ```
 
 ## 注意事項
@@ -246,4 +301,5 @@ poe_api_process = { version = "0.2.0", features = ["trace"] }
 - 請確保您擁有可使用的 [Poe API 訪問密鑰](https://poe.com/api_key)。
 - 使用 `stream_request` 時，請提供有效的 bot 名稱和訪問密鑰。
 - `get_model_list` 不需要訪問密鑰，可以直接使用。
+- `get_v1_model_list` 需要訪問密鑰，並作為 PoeClient 的方法調用。
 - 檔案上傳功能受到 Poe 平台的檔案大小和類型限制。

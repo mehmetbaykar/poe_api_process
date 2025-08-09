@@ -5,15 +5,16 @@
 
 ## 功能
 - 流式接收 bot 响应
-- 获取可用模型列表
+- 获取可用模型列表（支持传统 API 和 v1/models API）
 - 支持工具调用 (Tool Calls)
 - 支持文件上传与附件传送
+- 灵活的 URL 配置
 
 ## 安装
 在您的 `Cargo.toml` 文件中添加以下依赖：
 ```toml
 [dependencies]
-poe_api_process = "0.2.0"
+poe_api_process = "0.3.0"
 ```
 或使用 cargo 命令添加：
 ```bash
@@ -27,7 +28,13 @@ use poe_api_process::{PoeClient, ChatRequest, ChatMessage, ChatEventType};
 use futures_util::StreamExt;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
+    // v0.3.0 新语法：需要提供 URL 参数
+    let client = PoeClient::new(
+        "Claude-3.7-Sonnet",
+        "your_access_key",
+        "https://api.poe.com",
+        "https://www.quora.com"
+    );
     
     let request = ChatRequest {
         version: "1.1".to_string(),
@@ -194,6 +201,8 @@ let request = ChatRequest {
 ```
 
 ### 获取可用模型列表
+
+#### 使用传统 API
 ```rust
 use poe_api_process::get_model_list;
 #[tokio::main]
@@ -210,15 +219,79 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+#### 使用 v1/models API
+```rust
+use poe_api_process::PoeClient;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = PoeClient::new(
+        "Claude-3.7-Sonnet",
+        "your_access_key",
+        "https://api.poe.com",
+        "https://www.quora.com"
+    );
+    
+    // 获取 v1/models API 的模型列表
+    let models = client.get_v1_model_list().await?;
+    
+    println!("v1 API 可用模型列表:");
+    for (index, model) in models.data.iter().enumerate() {
+        println!("{}. {} (创建时间: {})", index + 1, model.id, model.created);
+    }
+    
+    Ok(())
+}
+```
+
+## 从 v0.2.x 迁移到 v0.3.0
+
+### 重大变更
+1. **PoeClient::new() 签名变更**：现在需要 4 个参数而不是 2 个
+2. **get_v1_model_list()** 现在是 PoeClient 的实例方法
+
+### 迁移步骤
+
+#### 更新 PoeClient 创建
+```rust
+// v0.2.x 旧语法
+let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
+
+// v0.3.0 新语法
+let client = PoeClient::new(
+    "Claude-3.7-Sonnet",
+    "your_access_key",
+    "https://api.poe.com",        // Poe API 基础 URL
+    "https://www.quora.com"       // 文件上传 URL
+);
+```
+
+#### 更新 v1 模型列表调用
+```rust
+// v0.2.x 旧语法
+use poe_api_process::get_v1_model_list;
+let models = get_v1_model_list("your_access_key").await?;
+
+// v0.3.0 新语法
+let client = PoeClient::new(
+    "Claude-3.7-Sonnet",
+    "your_access_key",
+    "https://api.poe.com",
+    "https://www.quora.com"
+);
+let models = client.get_v1_model_list().await?;
+```
+
 ## 调试功能
 启用 trace 功能可以获得详细的日志输出：
 ```toml
 [dependencies]
-poe_api_process = { version = "0.2.0", features = ["trace"] }
+poe_api_process = { version = "0.3.0", features = ["trace"] }
 ```
 
 ## 注意事项
 - 请确保您拥有可使用的 [Poe API 访问密钥](https://poe.com/api_key)。
 - 使用 `stream_request` 时，请提供有效的 bot 名称和访问密钥。
 - `get_model_list` 不需要访问密钥，可以直接使用。
+- `get_v1_model_list` 需要通过 PoeClient 实例调用，需要访问密钥。
 - 文件上传功能受到 Poe 平台的文件大小和类型限制。
+- URL 参数会自动处理末尾的斜线，确保格式正确。

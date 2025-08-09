@@ -12,26 +12,42 @@ use tokio_util::io::ReaderStream;
 #[cfg(feature = "trace")]
 use tracing::{debug, warn};
 
-const BASE_URL: &str = "https://api.poe.com/bot/";
 const POE_GQL_URL: &str = "https://poe.com/api/gql_POST";
 const POE_GQL_MODEL_HASH: &str = "b24b2f2f6da147b3345eec1a433ed17b6e1332df97dea47622868f41078a40cc";
-const POE_FILE_UPLOAD_URL: &str = "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST";
 
 #[derive(Clone)]
 pub struct PoeClient {
     client: Client,
     bot_name: String,
     access_key: String,
+    poe_base_url: String,
+    poe_file_upload_url: String,
 }
 
 impl PoeClient {
-    pub fn new(bot_name: &str, access_key: &str) -> Self {
+    pub fn new(bot_name: &str, access_key: &str, poe_base_url: &str, poe_file_upload_url: &str) -> Self {
         #[cfg(feature = "trace")]
         debug!("建立新的 PoeClient 實例，bot_name: {}", bot_name);
+        
+        // 處理 URL 末尾的斜線
+        let normalized_base_url = if poe_base_url.ends_with('/') {
+            poe_base_url.trim_end_matches('/').to_string()
+        } else {
+            poe_base_url.to_string()
+        };
+        
+        let normalized_file_upload_url = if poe_file_upload_url.ends_with('/') {
+            poe_file_upload_url.trim_end_matches('/').to_string()
+        } else {
+            poe_file_upload_url.to_string()
+        };
+        
         Self {
             client: Client::new(),
             bot_name: bot_name.to_string(),
             access_key: access_key.to_string(),
+            poe_base_url: normalized_base_url,
+            poe_file_upload_url: normalized_file_upload_url,
         }
     }
 
@@ -41,7 +57,7 @@ impl PoeClient {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
         #[cfg(feature = "trace")]
         debug!("開始串流請求，bot_name: {}", self.bot_name);
-        let url = format!("{}{}", BASE_URL, self.bot_name);
+        let url = format!("{}/bot/{}", self.poe_base_url, self.bot_name);
         #[cfg(feature = "trace")]
         debug!("發送請求至 URL: {}", url);
         let response = self
@@ -675,11 +691,11 @@ impl PoeClient {
         form: reqwest::multipart::Form,
     ) -> Result<FileUploadResponse, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("發送檔案上傳請求至 {}", POE_FILE_UPLOAD_URL);
+        debug!("發送檔案上傳請求至 {}", self.poe_file_upload_url);
 
         let response = self
             .client
-            .post(POE_FILE_UPLOAD_URL)
+            .post(&self.poe_file_upload_url)
             .header("Authorization", format!("Bearer {}", self.access_key))
             .multipart(form)
             .send()
@@ -729,6 +745,100 @@ impl PoeClient {
         debug!("檔案上傳成功，附件URL: {}", upload_response.attachment_url);
 
         Ok(upload_response)
+    }
+
+    /// 獲取 v1/models API 的模型列表 (需要 access_key)
+    pub async fn get_v1_model_list(&self) -> Result<ModelResponse, PoeError> {
+        #[cfg(feature = "trace")]
+        debug!("開始獲取 v1/models 模型列表");
+
+        let url = format!("{}/v1/models", self.poe_base_url);
+        #[cfg(feature = "trace")]
+        debug!("發送 v1/models 請求至 URL: {}", url);
+
+        let response = self.client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.access_key))
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .map_err(|e| {
+                #[cfg(feature = "trace")]
+                warn!("發送 v1/models 請求失敗: {}", e);
+                PoeError::RequestFailed(e)
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "無法讀取回應內容".to_string());
+
+            #[cfg(feature = "trace")]
+            warn!("v1/models API 回應錯誤 - 狀態碼: {}, 內容: {}", status, text);
+
+            return Err(PoeError::BotError(format!(
+                "v1/models API 回應錯誤 - 狀態碼: {}, 內容: {}",
+                status, text
+            )));
+        }
+
+        #[cfg(feature = "trace")]
+        debug!("成功接收到 v1/models 回應");
+
+        let response_text = response.text().await.map_err(|e| {
+            #[cfg(feature = "trace")]
+            warn!("讀取 v1/models 回應內容失敗: {}", e);
+            PoeError::RequestFailed(e)
+        })?;
+
+        #[cfg(feature = "trace")]
+        debug!("v1/models 回應內容: {}", response_text);
+
+        let json_data: Value = serde_json::from_str(&response_text).map_err(|e| {
+            #[cfg(feature = "trace")]
+            warn!("解析 v1/models 回應失敗: {}", e);
+            PoeError::JsonParseFailed(e)
+        })?;
+
+        let mut model_list = Vec::new();
+
+        if let Some(data_array) = json_data.get("data").and_then(Value::as_array) {
+            #[cfg(feature = "trace")]
+            debug!("找到 {} 個模型", data_array.len());
+
+            for model_data in data_array {
+                if let (Some(id), Some(object), Some(created), Some(owned_by)) = (
+                    model_data.get("id").and_then(Value::as_str),
+                    model_data.get("object").and_then(Value::as_str),
+                    model_data.get("created").and_then(Value::as_i64),
+                    model_data.get("owned_by").and_then(Value::as_str),
+                ) {
+                    model_list.push(ModelInfo {
+                        id: id.to_string(),
+                        object: object.to_string(),
+                        created,
+                        owned_by: owned_by.to_string(),
+                    });
+                }
+            }
+        } else {
+            #[cfg(feature = "trace")]
+            warn!("無法從 v1/models 回應中取得模型列表");
+            return Err(PoeError::BotError("無法從 v1/models 回應中取得模型列表".to_string()));
+        }
+
+        if model_list.is_empty() {
+            #[cfg(feature = "trace")]
+            warn!("取得的模型列表為空");
+            return Err(PoeError::BotError("取得的模型列表為空".to_string()));
+        }
+
+        #[cfg(feature = "trace")]
+        debug!("成功解析 {} 個模型", model_list.len());
+
+        Ok(ModelResponse { data: model_list })
     }
 }
 
@@ -873,3 +983,4 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
 
     Ok(ModelResponse { data: model_list })
 }
+
