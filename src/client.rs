@@ -25,23 +25,28 @@ pub struct PoeClient {
 }
 
 impl PoeClient {
-    pub fn new(bot_name: &str, access_key: &str, poe_base_url: &str, poe_file_upload_url: &str) -> Self {
+    pub fn new(
+        bot_name: &str,
+        access_key: &str,
+        poe_base_url: &str,
+        poe_file_upload_url: &str,
+    ) -> Self {
         #[cfg(feature = "trace")]
         debug!("建立新的 PoeClient 實例，bot_name: {}", bot_name);
-        
+
         // 處理 URL 末尾的斜線
         let normalized_base_url = if poe_base_url.ends_with('/') {
             poe_base_url.trim_end_matches('/').to_string()
         } else {
             poe_base_url.to_string()
         };
-        
+
         let normalized_file_upload_url = if poe_file_upload_url.ends_with('/') {
             poe_file_upload_url.trim_end_matches('/').to_string()
         } else {
             poe_file_upload_url.to_string()
         };
-        
+
         Self {
             client: Client::new(),
             bot_name: bot_name.to_string(),
@@ -53,13 +58,35 @@ impl PoeClient {
 
     pub async fn stream_request(
         &self,
-        request: ChatRequest,
+        #[cfg(feature = "xml")] mut request: ChatRequest,
+        #[cfg(not(feature = "xml"))] request: ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
         #[cfg(feature = "trace")]
         debug!("開始串流請求，bot_name: {}", self.bot_name);
+
+        // 當啟用 xml feature 時，自動將工具轉換為 XML 格式
+        #[cfg(feature = "xml")]
+        {
+            if request.tools.is_some() {
+                #[cfg(feature = "trace")]
+                debug!("檢測到 xml feature 啟用，自動將工具轉換為 XML 格式");
+
+                // 使用 xml 模塊中的方法
+                request.append_tools_as_xml();
+                request.tools = None; // 清除原始工具定義
+            }
+        }
+
         let url = format!("{}/bot/{}", self.poe_base_url, self.bot_name);
         #[cfg(feature = "trace")]
         debug!("發送請求至 URL: {}", url);
+
+        #[cfg(feature = "trace")]
+        debug!(
+            "發送的請求結構: {}",
+            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "無法序列化請求".to_string())
+        );
+
         let response = self
             .client
             .post(&url)
@@ -154,12 +181,66 @@ impl PoeClient {
                                             if let Some(text) = json.get("text").and_then(Value::as_str) {
                                                 #[cfg(feature = "trace")]
                                                 debug!("解析到文本數據，長度: {}", text.len());
-                                                events.push(Ok(ChatResponse {
-                                                    event: event_type.clone(),
-                                                    data: Some(ChatResponseData::Text {
-                                                        text: text.to_string(),
-                                                    }),
-                                                }));
+
+                                                // 檢查是否包含 XML 工具調用
+                                                #[cfg(feature = "xml")]
+                                                {
+                                                    let message = ChatMessage {
+                                                        role: "assistant".to_string(),
+                                                        content: text.to_string(),
+                                                        attachments: None,
+                                                        content_type: "text/plain".to_string(),
+                                                    };
+
+                                                    if message.contains_xml_tool_calls() {
+                                                        let tool_calls = message.extract_xml_tool_calls();
+                                                        if !tool_calls.is_empty() {
+                                                            #[cfg(feature = "trace")]
+                                                            debug!("檢測到 XML 工具調用，轉換為標準格式，數量: {}", tool_calls.len());
+
+                                                            // 發送工具調用事件
+                                                            events.push(Ok(ChatResponse {
+                                                                event: ChatEventType::Json,
+                                                                data: Some(ChatResponseData::ToolCalls(tool_calls)),
+                                                            }));
+
+                                                            // 繼續發送文本事件（移除 XML 部分）
+                                                            let clean_text = Self::remove_xml_tool_calls(text);
+                                                            if !clean_text.trim().is_empty() {
+                                                                events.push(Ok(ChatResponse {
+                                                                    event: event_type.clone(),
+                                                                    data: Some(ChatResponseData::Text {
+                                                                        text: clean_text,
+                                                                    }),
+                                                                }));
+                                                            }
+                                                        } else {
+                                                            events.push(Ok(ChatResponse {
+                                                                event: event_type.clone(),
+                                                                data: Some(ChatResponseData::Text {
+                                                                    text: text.to_string(),
+                                                                }),
+                                                            }));
+                                                        }
+                                                    } else {
+                                                        events.push(Ok(ChatResponse {
+                                                            event: event_type.clone(),
+                                                            data: Some(ChatResponseData::Text {
+                                                                text: text.to_string(),
+                                                            }),
+                                                        }));
+                                                    }
+                                                }
+
+                                                #[cfg(not(feature = "xml"))]
+                                                {
+                                                    events.push(Ok(ChatResponse {
+                                                        event: event_type.clone(),
+                                                        data: Some(ChatResponseData::Text {
+                                                            text: text.to_string(),
+                                                        }),
+                                                    }));
+                                                }
                                             }
                                         } else {
                                             #[cfg(feature = "trace")]
@@ -541,7 +622,13 @@ impl PoeClient {
         request.tool_calls = Some(tool_calls);
         request.tool_results = Some(tool_results);
 
-        // 發送請求並處理響應
+        #[cfg(feature = "trace")]
+        debug!(
+            "發送工具結果請求結構: {}",
+            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "無法序列化請求".to_string())
+        );
+
+        // 發送請求並處理響應（stream_request 會自動處理 XML feature）
         self.stream_request(request).await
     }
 
@@ -563,20 +650,20 @@ impl PoeClient {
             warn!("檔案不存在: {}", file_path);
             return Err(PoeError::FileNotFound(file_path.to_string()));
         }
-        
+
         // 簡化 MIME 類型處理：如果有提供 mime_type 就使用，否則使用預設值
         let content_type = mime_type.unwrap_or("application/octet-stream").to_string();
-        
+
         #[cfg(feature = "trace")]
         debug!("使用 MIME 類型: {}", content_type);
-        
+
         // 建立 multipart 表單
         let file = tokio::fs::File::open(path).await.map_err(|e| {
             #[cfg(feature = "trace")]
             warn!("無法開啟檔案: {}", e);
             PoeError::FileReadError(e)
         })?;
-        
+
         let file_part =
             reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(ReaderStream::new(file)))
                 .file_name(
@@ -591,9 +678,9 @@ impl PoeClient {
                     warn!("設置 MIME 類型失敗: {}", e);
                     PoeError::FileUploadFailed(format!("設置 MIME 類型失敗: {}", e))
                 })?;
-                
+
         let form = reqwest::multipart::Form::new().part("file", file_part);
-            
+
         // 發送請求
         self.send_upload_request(form).await
     }
@@ -756,7 +843,8 @@ impl PoeClient {
         #[cfg(feature = "trace")]
         debug!("發送 v1/models 請求至 URL: {}", url);
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.access_key))
             .header("Content-Type", "application/json")
@@ -776,7 +864,10 @@ impl PoeClient {
                 .unwrap_or_else(|_| "無法讀取回應內容".to_string());
 
             #[cfg(feature = "trace")]
-            warn!("v1/models API 回應錯誤 - 狀態碼: {}, 內容: {}", status, text);
+            warn!(
+                "v1/models API 回應錯誤 - 狀態碼: {}, 內容: {}",
+                status, text
+            );
 
             return Err(PoeError::BotError(format!(
                 "v1/models API 回應錯誤 - 狀態碼: {}, 內容: {}",
@@ -826,7 +917,9 @@ impl PoeClient {
         } else {
             #[cfg(feature = "trace")]
             warn!("無法從 v1/models 回應中取得模型列表");
-            return Err(PoeError::BotError("無法從 v1/models 回應中取得模型列表".to_string()));
+            return Err(PoeError::BotError(
+                "無法從 v1/models 回應中取得模型列表".to_string(),
+            ));
         }
 
         if model_list.is_empty() {
@@ -839,6 +932,74 @@ impl PoeClient {
         debug!("成功解析 {} 個模型", model_list.len());
 
         Ok(ModelResponse { data: model_list })
+    }
+
+    /// 從文本中移除 XML 工具調用部分
+    #[cfg(feature = "xml")]
+    pub fn remove_xml_tool_calls(text: &str) -> String {
+        // 創建一個臨時的 ChatMessage 來檢測工具調用
+        let message = ChatMessage {
+            role: "assistant".to_string(),
+            content: text.to_string(),
+            attachments: None,
+            content_type: "text/plain".to_string(),
+        };
+
+        // 如果沒有檢測到工具調用，直接返回原文本
+        if !message.contains_xml_tool_calls() {
+            return text.to_string();
+        }
+
+        // 提取工具調用以了解需要移除哪些部分
+        let tool_calls = message.extract_xml_tool_calls();
+        if tool_calls.is_empty() {
+            return text.to_string();
+        }
+
+        let mut result = text.to_string();
+
+        // 移除 <tool_call>...</tool_call> 標籤
+        while let Some(start) = result.find("<tool_call>") {
+            if let Some(end) = result[start..].find("</tool_call>") {
+                let end_pos = start + end + "</tool_call>".len();
+                result.replace_range(start..end_pos, "");
+            } else {
+                break;
+            }
+        }
+
+        // 根據檢測到的工具調用移除對應的工具標籤
+        for tool_call in &tool_calls {
+            let tool_name = &tool_call.function.name;
+            let start_pattern = format!("<{}>", tool_name);
+            let end_pattern = format!("</{}>", tool_name);
+
+            while let Some(start) = result.find(&start_pattern) {
+                if let Some(end) = result[start..].find(&end_pattern) {
+                    let end_pos = start + end + end_pattern.len();
+                    result.replace_range(start..end_pos, "");
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // 移除 <invoke> 標籤（如果存在）
+        while let Some(start) = result.find("<invoke") {
+            if let Some(end) = result[start..].find("</invoke>") {
+                let end_pos = start + end + "</invoke>".len();
+                result.replace_range(start..end_pos, "");
+            } else {
+                break;
+            }
+        }
+
+        // 清理多餘的空行
+        result
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -983,4 +1144,3 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
 
     Ok(ModelResponse { data: model_list })
 }
-

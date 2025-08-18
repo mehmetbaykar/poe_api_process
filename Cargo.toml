@@ -1,6 +1,6 @@
 [package]
 name = "poe_api_process"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 publish = ["crates-io"]
 authors = ["Jerome Leong <jeromeleong1998@gmail.com>"]
@@ -12,15 +12,16 @@ categories = ["api-bindings"]
 
 [features]
 trace = []
+xml = []
 
 [dependencies]
-reqwest = { version = "0.12.22", features = ["json", "stream", "multipart"] }
+reqwest = { version = "0.12.23", features = ["json", "stream", "multipart"] }
 tokio = { version = "1.47.1", features = ["full", "fs"] }
 tokio-util = { version = "0.7.16", features = ["io"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 futures-util = "0.3.31"
-thiserror = "2.0.12"
+thiserror = "2.0.15"
 bytes = "1.10.1"
 tracing = { version = "0.1.41", features = ["async-await"] }
 url = "2.5.4"

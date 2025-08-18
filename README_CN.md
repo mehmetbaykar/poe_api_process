@@ -8,13 +8,14 @@
 - 获取可用模型列表（支持传统 API 和 v1/models API）
 - 支持工具调用 (Tool Calls)
 - 支持文件上传与附件传送
+- 支持 XML 格式工具调用（可选功能）
 - 灵活的 URL 配置
 
 ## 安装
 在您的 `Cargo.toml` 文件中添加以下依赖：
 ```toml
 [dependencies]
-poe_api_process = "0.3.0"
+poe_api_process = "0.4.0"
 ```
 或使用 cargo 命令添加：
 ```bash
@@ -33,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Claude-3.7-Sonnet",
         "your_access_key",
         "https://api.poe.com",
-        "https://www.quora.com"
+        "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST"
     );
     
     let request = ChatRequest {
@@ -92,6 +93,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ChatEventType::Json => {
                     println!("收到 JSON 事件");
                 },
+                ChatEventType::File => {
+                    if let Some(data) = event.data {
+                        if let crate::types::ChatResponseData::File(file_data) = data {
+                            println!("收到文件: {} ({})", file_data.name, file_data.url);
+                        }
+                    }
+                },
             },
             Err(e) => eprintln!("错误: {}", e),
         }
@@ -102,6 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 ### 工具调用 (Tool Call)
+
+PS: 原生BOT接口的工具调用只支持少量模型，并且使用格式严格，建议使用 XML Feature。
+
 - **工具调用 (Tool Call)**: 允许 AI 模型请求执行特定的工具或函数。例如，AI 可能需要查询天气、搜索网页或执行计算等操作。
 - **工具结果 (Tool Result)**: 工具执行后返回的结果，将被发送回 AI 模型以继续对话。
 
@@ -170,6 +181,15 @@ while let Some(response) = stream.next().await {
 }
 ```
 
+#### XML 工具调用
+
+启用 xml 功能可以将工具调用改为 XML 的方式使用，自动化处理XML内容，不需要改动原有代码：
+
+```toml
+[dependencies]
+poe_api_process = { version = "0.4.0", features = ["xml"] }
+```
+
 ### 文件上传与使用附件
 本库支持上传本地或远程文件，并在请求中附加这些文件：
 ```rust
@@ -228,7 +248,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Claude-3.7-Sonnet",
         "your_access_key",
         "https://api.poe.com",
-        "https://www.quora.com"
+        "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST"
     );
     
     // 获取 v1/models API 的模型列表
@@ -243,49 +263,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## 从 v0.2.x 迁移到 v0.3.0
+## v0.3.0 版本变更
 
 ### 重大变更
-1. **PoeClient::new() 签名变更**：现在需要 4 个参数而不是 2 个
-2. **get_v1_model_list()** 现在是 PoeClient 的实例方法
+- **PoeClient::new()** 现在需要四个参数：`bot_name`、`access_key`、`poe_base_url`、`poe_file_upload_url`
+- 新增 **get_v1_model_list()** 方法作为 PoeClient 的实例方法
+- 自动处理 URL 末尾斜线规范化
 
-### 迁移步骤
-
-#### 更新 PoeClient 创建
+### 迁移指南
 ```rust
-// v0.2.x 旧语法
+// v0.2.x 版本
 let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
 
-// v0.3.0 新语法
-let client = PoeClient::new(
-    "Claude-3.7-Sonnet",
-    "your_access_key",
-    "https://api.poe.com",        // Poe API 基础 URL
-    "https://www.quora.com"       // 文件上传 URL
-);
-```
-
-#### 更新 v1 模型列表调用
-```rust
-// v0.2.x 旧语法
-use poe_api_process::get_v1_model_list;
-let models = get_v1_model_list("your_access_key").await?;
-
-// v0.3.0 新语法
+// v0.3.0+ 版本
 let client = PoeClient::new(
     "Claude-3.7-Sonnet",
     "your_access_key",
     "https://api.poe.com",
-    "https://www.quora.com"
+    "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST"
 );
-let models = client.get_v1_model_list().await?;
 ```
 
 ## 调试功能
 启用 trace 功能可以获得详细的日志输出：
 ```toml
 [dependencies]
-poe_api_process = { version = "0.3.0", features = ["trace"] }
+poe_api_process = { version = "0.4.0", features = ["trace"] }
 ```
 
 ## 注意事项

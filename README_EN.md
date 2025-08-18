@@ -9,6 +9,7 @@ This is a Rust implementation of a Poe API client library. It allows you to inte
 - Get list of available models (supports traditional API and v1/models API)
 - Support for Tool Calls
 - Support for file uploads and attachments
+- Support for XML format tool calls (optional feature)
 - Flexible URL configuration
 
 ## Installation
@@ -17,7 +18,7 @@ Add this dependency to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
-poe_api_process = "0.3.0"
+poe_api_process = "0.4.0"
 ```
 
 Or use the cargo command:
@@ -95,9 +96,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ChatEventType::Done => {
                     println!("Conversation complete");
                     break;
-                },
                 ChatEventType::Json => {
                     println!("Received JSON event");
+                },
+                ChatEventType::File => {
+                    if let Some(data) = event.data {
+                        if let crate::types::ChatResponseData::File(file_data) = data {
+                            println!("Received file: {} ({})", file_data.name, file_data.url);
+                        }
+                    }
+                },
                 },
             },
             Err(e) => eprintln!("Error: {}", e),
@@ -109,6 +117,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 ### Tool Calls
+
+PS: Native BOT interface tool calls only support a limited number of models and have strict formatting requirements. It is recommended to use the XML Feature.
 
 - **Tool Call**: Allows AI models to request execution of specific tools or functions. For example, AI might need to query weather, search the web, or perform calculations.
 - **Tool Result**: The result returned after tool execution, which will be sent back to the AI model to continue the conversation.
@@ -180,6 +190,15 @@ while let Some(response) = stream.next().await {
         Err(e) => eprintln!("Error: {}", e),
     }
 }
+```
+
+#### XML Tool Calls
+
+Enable the xml feature to use tool calls in XML format, automatically handling XML content without changing existing code:
+
+```toml
+[dependencies]
+poe_api_process = { version = "0.4.0", features = ["xml"] }
 ```
 
 ### File Upload and Attachments
@@ -271,7 +290,7 @@ Enable trace functionality for detailed log output:
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.3.0", features = ["trace"] }
+poe_api_process = { version = "0.4.0", features = ["trace"] }
 ```
 
 ## v0.3.0 Version Changes
@@ -286,7 +305,7 @@ poe_api_process = { version = "0.3.0", features = ["trace"] }
 // v0.2.x version
 let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
 
-// v0.3.0 version
+// v0.3.0+ version
 let client = PoeClient::new(
     "Claude-3.7-Sonnet",
     "your_access_key",

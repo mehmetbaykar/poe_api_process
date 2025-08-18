@@ -10,15 +10,16 @@
 - 獲取可用模型列表（支援傳統 API 和 v1/models API）
 - 支援工具調用 (Tool Calls)
 - 支援檔案上傳與附件傳送
+- 支援 XML 格式工具調用（可選功能）
 - 靈活的 URL 配置
 
 ## 安裝
 
 在您的 `Cargo.toml` 文件中添加以下依賴：
-
 ```toml
 [dependencies]
-poe_api_process = "0.3.0"
+poe_api_process = "0.4.0"
+```
 ```
 
 或使用 cargo 指令添加：
@@ -100,6 +101,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ChatEventType::Json => {
                     println!("收到 JSON 事件");
                 },
+                ChatEventType::File => {
+                    if let Some(data) = event.data {
+                        if let crate::types::ChatResponseData::File(file_data) = data {
+                            println!("收到檔案: {} ({})", file_data.name, file_data.url);
+                        }
+                    }
+                },
             },
             Err(e) => eprintln!("錯誤: {}", e),
         }
@@ -110,6 +118,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 ### 工具調用 (Tool Call)
+
+PS: 原生BOT接口的工具調用只支持少量模型，並且使用格式嚴格，建議使用 XML Feature。
 
 - **工具調用 (Tool Call)**: 允許 AI 模型請求執行特定的工具或函數。例如，AI 可能需要查詢天氣、搜索網頁或執行計算等操作。
 - **工具結果 (Tool Result)**: 工具執行後返回的結果，將被發送回 AI 模型以繼續對話。
@@ -181,6 +191,15 @@ while let Some(response) = stream.next().await {
         Err(e) => eprintln!("錯誤: {}", e),
     }
 }
+```
+
+#### XML 工具調用
+
+啟用 xml 功能可以將工具調用改為 XML 的方式使用，自動化處理XML內容，不需要改動原有代碼：
+
+```toml
+[dependencies]
+poe_api_process = { version = "0.4.0", features = ["xml"] }
 ```
 
 ### 檔案上傳與使用附件
@@ -272,7 +291,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.3.0", features = ["trace"] }
+poe_api_process = { version = "0.4.0", features = ["trace"] }
 ```
 
 ## v0.3.0 版本變更
@@ -287,7 +306,7 @@ poe_api_process = { version = "0.3.0", features = ["trace"] }
 // v0.2.x 版本
 let client = PoeClient::new("Claude-3.7-Sonnet", "your_access_key");
 
-// v0.3.0 版本
+// v0.3.0+ 版本
 let client = PoeClient::new(
     "Claude-3.7-Sonnet",
     "your_access_key",
