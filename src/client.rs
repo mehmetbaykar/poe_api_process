@@ -14,6 +14,7 @@ use tracing::{debug, warn};
 
 const POE_GQL_URL: &str = "https://poe.com/api/gql_POST";
 const POE_GQL_MODEL_HASH: &str = "b24b2f2f6da147b3345eec1a433ed17b6e1332df97dea47622868f41078a40cc";
+const POE_GQL_MODEL_REVISION: &str = "e2acc7025b43e08e88164ba8105273f37fbeaa26";
 
 #[derive(Clone)]
 pub struct PoeClient {
@@ -112,6 +113,12 @@ impl PoeClient {
         let mut accumulated_tool_calls: Vec<PartialToolCall> = Vec::new();
         let mut tool_calls_complete = false;
 
+        // XML 工具調用緩衝和檢測狀態
+        #[cfg(feature = "xml")]
+        let mut xml_text_buffer = String::new();
+        #[cfg(feature = "xml")]
+        let mut xml_detection_active = false;
+
         let stream = response
             .bytes_stream()
             .map(move |result| {
@@ -182,47 +189,79 @@ impl PoeClient {
                                                 #[cfg(feature = "trace")]
                                                 debug!("解析到文本數據，長度: {}", text.len());
 
-                                                // 檢查是否包含 XML 工具調用
+                                                // XML 工具調用檢測和緩衝邏輯
                                                 #[cfg(feature = "xml")]
                                                 {
-                                                    let message = ChatMessage {
-                                                        role: "assistant".to_string(),
-                                                        content: text.to_string(),
-                                                        attachments: None,
-                                                        content_type: "text/plain".to_string(),
-                                                    };
-
-                                                    if message.contains_xml_tool_calls() {
-                                                        let tool_calls = message.extract_xml_tool_calls();
-                                                        if !tool_calls.is_empty() {
-                                                            #[cfg(feature = "trace")]
-                                                            debug!("檢測到 XML 工具調用，轉換為標準格式，數量: {}", tool_calls.len());
-
-                                                            // 發送工具調用事件
-                                                            events.push(Ok(ChatResponse {
-                                                                event: ChatEventType::Json,
-                                                                data: Some(ChatResponseData::ToolCalls(tool_calls)),
-                                                            }));
-
-                                                            // 繼續發送文本事件（移除 XML 部分）
-                                                            let clean_text = Self::remove_xml_tool_calls(text);
-                                                            if !clean_text.trim().is_empty() {
+                                                    // 將文本添加到 XML 緩衝區
+                                                    xml_text_buffer.push_str(text);
+                                                    // 檢查是否開始 XML 工具調用
+                                                    if !xml_detection_active && text.contains("<") {
+                                                        xml_detection_active = true;
+                                                        #[cfg(feature = "trace")]
+                                                        debug!("檢測到 '<' 字符，開始 XML 緩衝");
+                                                    }
+                                                    // 如果正在檢測 XML，檢查是否有完整的工具調用
+                                                    if xml_detection_active {
+                                                        let message = ChatMessage {
+                                                            role: "assistant".to_string(),
+                                                            content: xml_text_buffer.clone(),
+                                                            attachments: None,
+                                                            content_type: "text/plain".to_string(),
+                                                        };
+                                                        if message.contains_xml_tool_calls() {
+                                                            let tool_calls = message.extract_xml_tool_calls();
+                                                            if !tool_calls.is_empty() {
+                                                                #[cfg(feature = "trace")]
+                                                                debug!("檢測到完整的 XML 工具調用，轉換為標準格式，數量: {}", tool_calls.len());
+                                                                // 發送工具調用事件
+                                                                events.push(Ok(ChatResponse {
+                                                                    event: ChatEventType::Json,
+                                                                    data: Some(ChatResponseData::ToolCalls(tool_calls)),
+                                                                }));
+                                                                // 移除 XML 部分並發送剩餘文本
+                                                                let clean_text = Self::remove_xml_tool_calls(&xml_text_buffer);
+                                                                if !clean_text.trim().is_empty() {
+                                                                    events.push(Ok(ChatResponse {
+                                                                        event: event_type.clone(),
+                                                                        data: Some(ChatResponseData::Text {
+                                                                            text: clean_text,
+                                                                        }),
+                                                                    }));
+                                                                }
+                                                                // 重置 XML 緩衝狀態
+                                                                xml_text_buffer.clear();
+                                                                xml_detection_active = false;
+                                                            } else {
+                                                                // 沒有完整的工具調用，繼續緩衝
+                                                                #[cfg(feature = "trace")]
+                                                                debug!("XML 工具調用尚未完整，繼續緩衝");
+                                                            }
+                                                        } else {
+                                                            // 檢查緩衝區是否過大或包含結束標記
+                                                            if xml_text_buffer.len() > 10000 ||
+                                                               (!xml_text_buffer.contains("<tool_call>") &&
+                                                                !xml_text_buffer.contains("<invoke") &&
+                                                                xml_text_buffer.chars().filter(|&c| c == '>').count() > 3) {
+                                                                #[cfg(feature = "trace")]
+                                                                debug!("XML 緩衝區過大或不包含工具調用，發送為普通文本");
+                                                                // 發送緩衝的文本
                                                                 events.push(Ok(ChatResponse {
                                                                     event: event_type.clone(),
                                                                     data: Some(ChatResponseData::Text {
-                                                                        text: clean_text,
+                                                                        text: xml_text_buffer.clone(),
                                                                     }),
                                                                 }));
+                                                                // 重置緩衝狀態
+                                                                xml_text_buffer.clear();
+                                                                xml_detection_active = false;
+                                                            } else {
+                                                                // 繼續緩衝
+                                                                #[cfg(feature = "trace")]
+                                                                debug!("繼續緩衝 XML 文本，當前長度: {}", xml_text_buffer.len());
                                                             }
-                                                        } else {
-                                                            events.push(Ok(ChatResponse {
-                                                                event: event_type.clone(),
-                                                                data: Some(ChatResponseData::Text {
-                                                                    text: text.to_string(),
-                                                                }),
-                                                            }));
                                                         }
                                                     } else {
+                                                        // 沒有檢測到 XML，直接發送文本
                                                         events.push(Ok(ChatResponse {
                                                             event: event_type.clone(),
                                                             data: Some(ChatResponseData::Text {
@@ -355,6 +394,61 @@ impl PoeClient {
                                     ChatEventType::Done => {
                                         #[cfg(feature = "trace")]
                                         debug!("收到完成事件");
+                                        // 處理任何剩餘的 XML 緩衝內容
+                                        #[cfg(feature = "xml")]
+                                        {
+                                            if xml_detection_active && !xml_text_buffer.trim().is_empty() {
+                                                #[cfg(feature = "trace")]
+                                                debug!("處理剩餘的 XML 緩衝內容，長度: {}", xml_text_buffer.len());
+                                                let message = ChatMessage {
+                                                    role: "assistant".to_string(),
+                                                    content: xml_text_buffer.clone(),
+                                                    attachments: None,
+                                                    content_type: "text/plain".to_string(),
+                                                };
+                                                if message.contains_xml_tool_calls() {
+                                                    let tool_calls = message.extract_xml_tool_calls();
+                                                    if !tool_calls.is_empty() {
+                                                        #[cfg(feature = "trace")]
+                                                        debug!("在完成事件中檢測到 XML 工具調用，數量: {}", tool_calls.len());
+                                                        // 發送工具調用事件
+                                                        events.push(Ok(ChatResponse {
+                                                            event: ChatEventType::Json,
+                                                            data: Some(ChatResponseData::ToolCalls(tool_calls)),
+                                                        }));
+                                                        // 發送清理後的文本（如果有）
+                                                        let clean_text = Self::remove_xml_tool_calls(&xml_text_buffer);
+                                                        if !clean_text.trim().is_empty() {
+                                                            events.push(Ok(ChatResponse {
+                                                                event: ChatEventType::Text,
+                                                                data: Some(ChatResponseData::Text {
+                                                                    text: clean_text,
+                                                                }),
+                                                            }));
+                                                        }
+                                                    } else {
+                                                        // 發送為普通文本
+                                                        events.push(Ok(ChatResponse {
+                                                            event: ChatEventType::Text,
+                                                            data: Some(ChatResponseData::Text {
+                                                                text: xml_text_buffer.clone(),
+                                                            }),
+                                                        }));
+                                                    }
+                                                } else {
+                                                    // 發送為普通文本
+                                                    events.push(Ok(ChatResponse {
+                                                        event: ChatEventType::Text,
+                                                        data: Some(ChatResponseData::Text {
+                                                            text: xml_text_buffer.clone(),
+                                                        }),
+                                                    }));
+                                                }
+                                                // 清理緩衝狀態
+                                                xml_text_buffer.clear();
+                                                xml_detection_active = false;
+                                            }
+                                        }
                                         events.push(Ok(ChatResponse {
                                             event: ChatEventType::Done,
                                             data: Some(ChatResponseData::Empty),
@@ -1042,6 +1136,10 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
     headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("empty"));
     headers.insert("Sec-Fetch-Mode", HeaderValue::from_static("cors"));
     headers.insert("Sec-Fetch-Site", HeaderValue::from_static("same-origin"));
+    headers.insert(
+        "poe-revision",
+        HeaderValue::from_static(POE_GQL_MODEL_REVISION),
+    );
     headers.insert("poegraphql", HeaderValue::from_static("1"));
 
     if let Some(code) = language_code {
