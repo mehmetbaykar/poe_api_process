@@ -675,7 +675,7 @@ async fn test_get_v1_model_list() {
 
 // XML 解析測試用例
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_xml_tool_call_detection() {
     setup();
     debug!("開始測試 XML 工具調用檢測");
@@ -692,7 +692,7 @@ async fn test_xml_tool_call_detection() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_xml_tool_call_extraction() {
     setup();
     debug!("開始測試 XML 工具調用提取");
@@ -722,7 +722,7 @@ async fn test_xml_tool_call_extraction() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_multiple_xml_tool_calls() {
     setup();
     debug!("開始測試多個 XML 工具調用");
@@ -766,7 +766,7 @@ async fn test_multiple_xml_tool_calls() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_xml_tool_call_with_complex_parameters() {
     setup();
     debug!("開始測試複雜參數的 XML 工具調用");
@@ -800,7 +800,7 @@ async fn test_xml_tool_call_with_complex_parameters() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_no_xml_tool_calls() {
     setup();
     debug!("開始測試沒有 XML 工具調用的情況");
@@ -823,7 +823,7 @@ async fn test_no_xml_tool_calls() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_xml_tool_call_with_empty_parameters() {
     setup();
     debug!("開始測試沒有參數的 XML 工具調用");
@@ -854,7 +854,7 @@ async fn test_xml_tool_call_with_empty_parameters() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_xml_tool_call_parsing_error_handling() {
     setup();
     debug!("開始測試 XML 工具調用解析錯誤處理");
@@ -876,7 +876,7 @@ async fn test_xml_tool_call_parsing_error_handling() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_xml_entity_decoding() {
     setup();
     debug!("開始測試 XML 實體解碼");
@@ -903,7 +903,7 @@ async fn test_xml_entity_decoding() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_dynamic_xml_tool_call_detection() {
     setup();
     debug!("開始測試動態 XML 工具調用檢測");
@@ -977,7 +977,7 @@ async fn test_dynamic_xml_tool_call_detection() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_dynamic_xml_tool_call_extraction() {
     setup();
     debug!("開始測試動態 XML 工具調用提取");
@@ -1054,7 +1054,7 @@ async fn test_dynamic_xml_tool_call_extraction() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_potential_tool_name_detection() {
     setup();
     debug!("開始測試潛在工具名稱檢測");
@@ -1140,7 +1140,7 @@ async fn test_potential_tool_name_detection() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_mixed_tool_call_formats() {
     setup();
     debug!("開始測試混合工具調用格式");
@@ -1202,7 +1202,7 @@ async fn test_mixed_tool_call_formats() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_remove_xml_tool_calls_with_tool_cells() {
     setup();
     debug!("開始測試移除包含工具調用的 XML");
@@ -1246,7 +1246,7 @@ async fn test_remove_xml_tool_calls_with_tool_cells() {
 }
 
 #[cfg(feature = "xml")]
-#[tokio::test]
+#[test_log::test(tokio::test)]
 async fn test_remove_xml_tool_calls_without_tool_cells() {
     setup();
     debug!("開始測試移除不包含工具調用的文本");

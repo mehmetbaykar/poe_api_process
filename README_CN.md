@@ -15,7 +15,7 @@
 在您的 `Cargo.toml` 文件中添加以下依赖：
 ```toml
 [dependencies]
-poe_api_process = "0.4.1"
+poe_api_process = "0.4.2"
 ```
 或使用 cargo 命令添加：
 ```bash
@@ -187,7 +187,7 @@ while let Some(response) = stream.next().await {
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.4.0", features = ["xml"] }
+poe_api_process = { version = "0.4.2", features = ["xml"] }
 ```
 
 ### 文件上传与使用附件
@@ -288,7 +288,7 @@ let client = PoeClient::new(
 启用 trace 功能可以获得详细的日志输出：
 ```toml
 [dependencies]
-poe_api_process = { version = "0.4.0", features = ["trace"] }
+poe_api_process = { version = "0.4.2", features = ["trace"] }
 ```
 
 ## 注意事项

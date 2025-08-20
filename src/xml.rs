@@ -1,5 +1,22 @@
-use crate::types::{ChatMessage, ChatRequest, ChatTool, ChatToolCall, FunctionCall};
+use crate::types::{
+    ChatMessage, ChatRequest, ChatTool, ChatToolCall, ChatToolResult, FunctionCall,
+};
 use std::collections::HashMap;
+
+#[cfg(feature = "trace")]
+fn safe_string_truncate(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+
+    // 從 max_bytes 位置向前查找，直到找到有效的字符邊界
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    &s[..end]
+}
 
 // XML 工具格式相關結構
 #[derive(Debug, Clone)]
@@ -108,6 +125,46 @@ impl ToXml for Vec<ChatTool> {
     }
 }
 
+impl ToXml for ChatToolResult {
+    fn to_xml(&self) -> String {
+        let mut xml = String::new();
+        xml.push_str(&format!(
+            "  <result tool_call_id=\"{}\">",
+            escape_xml(&self.tool_call_id)
+        ));
+
+        // 檢查內容是否為錯誤格式
+        if self.content.trim().starts_with("ERROR:") || self.content.trim().starts_with("Error:") {
+            xml.push_str("\n    <error>");
+            xml.push_str(&escape_xml(&self.content));
+            xml.push_str("</error>");
+        } else {
+            xml.push_str("\n    <output>");
+            xml.push_str(&escape_xml(&self.content));
+            xml.push_str("</output>");
+        }
+
+        xml.push_str("\n  </result>");
+        xml
+    }
+}
+
+impl ToXml for Vec<ChatToolResult> {
+    fn to_xml(&self) -> String {
+        if self.is_empty() {
+            return String::new();
+        }
+
+        let mut xml = String::from("\n\n<tool_results>");
+        for result in self {
+            xml.push('\n');
+            xml.push_str(&result.to_xml());
+        }
+        xml.push_str("\n</tool_results>");
+        xml
+    }
+}
+
 // XML 轉義函數
 fn escape_xml(text: &str) -> String {
     text.replace('&', "&amp;")
@@ -125,6 +182,15 @@ impl ChatMessage {
             let tools_vec = tools.to_vec();
             let xml_tools = tools_vec.to_xml();
             self.content.push_str(&xml_tools);
+        }
+    }
+
+    /// 將 XML 格式的工具結果附加到消息內容末尾（內部使用）
+    pub(crate) fn append_xml_tool_results(&mut self, tool_results: &[ChatToolResult]) {
+        if !tool_results.is_empty() {
+            let results_vec = tool_results.to_vec();
+            let xml_results = results_vec.to_xml();
+            self.content.push_str(&xml_results);
         }
     }
 }
@@ -199,6 +265,36 @@ Now, begin your work based on the user's next prompt. Remember, you are a proble
             }
         }
     }
+
+    /// 將工具結果以 XML 格式附加到最後一條用戶消息中（內部使用）
+    pub(crate) fn append_tool_results_as_xml(&mut self) {
+        if let Some(ref tool_results) = self.tool_results {
+            if !tool_results.is_empty() {
+                // 找到最後一條用戶消息
+                for message in self.query.iter_mut().rev() {
+                    if message.role == "user" {
+                        // 添加工具結果分析提示詞
+                        let tool_results_prompt = r#"
+
+You have previously requested one or more tool calls. The results are now available. Your new task is to analyze these results and formulate a final, comprehensive answer for the user in natural language.
+
+The tool results are provided to you in the following XML format:
+
+**Your Instructions:**
+
+1.  **Analyze the Results**: Carefully examine the content within the `<output>` or `<error>` tags for each result.
+2.  **Synthesize, Don't Recite**: Do not just repeat the raw tool output (like raw JSON). You **must interpret** the data, synthesize information if there are multiple results, and present it to the user in a clear, conversational, and helpful way.
+3.  **Formulate the Final Answer**: Your response should be the complete and final answer to the user's original query. Do not output any more `<tool_call>` blocks unless the results explicitly indicate a necessary follow-up action.
+4.  **Handle Errors Gracefully**: If a tool returned an error, politely inform the user that you were unable to retrieve that specific piece of information and, if appropriate, briefly explain the issue (e.g., "I couldn't find information for that city.").
+"#;
+                        message.content.push_str(tool_results_prompt);
+                        message.append_xml_tool_results(tool_results);
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // XML 工具調用解析功能
@@ -213,71 +309,54 @@ impl XmlToolCallParser {
         {
             use tracing::debug;
             debug!("開始解析 XML 工具調用，文本長度: {}", text.len());
-            debug!(
-                "文本內容預覽: {}",
-                if text.len() > 300 { &text[..300] } else { text }
-            );
+            debug!("文本內容預覽: {}", safe_string_truncate(text, 300));
         }
 
         // 查找所有的工具調用標籤
-        if let Some(start) = text.find("<tool_call>") {
-            let mut current_pos = start;
-            let mut call_id = 1;
+        let mut current_pos = 0;
+        let mut call_id = 1;
 
-            #[cfg(feature = "trace")]
-            {
-                use tracing::debug;
-                debug!("找到第一個 <tool_call> 標籤，位置: {}", start);
-            }
+        while let Some(call_start) = text[current_pos..].find("<tool_call>") {
+            let actual_start = current_pos + call_start;
 
-            while let Some(call_start) = text[current_pos..].find("<tool_call>") {
-                let actual_start = current_pos + call_start;
+            if let Some(call_end) = text[actual_start..].find("</tool_call>") {
+                let actual_end = actual_start + call_end + "</tool_call>".len();
+                let call_content = &text[actual_start..actual_end];
 
-                if let Some(call_end) = text[actual_start..].find("</tool_call>") {
-                    let actual_end = actual_start + call_end + "</tool_call>".len();
-                    let call_content = &text[actual_start..actual_end];
+                #[cfg(feature = "trace")]
+                {
+                    use tracing::debug;
+                    debug!(
+                        "找到完整的工具調用 #{}, 開始位置: {}, 結束位置: {}",
+                        call_id, actual_start, actual_end
+                    );
+                    debug!("工具調用內容: {}", call_content);
+                }
 
+                if let Some(tool_call) = Self::parse_single_tool_call(call_content, call_id) {
                     #[cfg(feature = "trace")]
                     {
                         use tracing::debug;
-                        debug!(
-                            "找到完整的工具調用 #{}, 開始位置: {}, 結束位置: {}",
-                            call_id, actual_start, actual_end
-                        );
-                        debug!("工具調用內容: {}", call_content);
+                        debug!("成功解析工具調用 #{}: {}", call_id, tool_call.function.name);
                     }
-
-                    if let Some(tool_call) = Self::parse_single_tool_call(call_content, call_id) {
-                        #[cfg(feature = "trace")]
-                        {
-                            use tracing::debug;
-                            debug!("成功解析工具調用 #{}: {}", call_id, tool_call.function.name);
-                        }
-                        tool_calls.push(tool_call);
-                        call_id += 1;
-                    } else {
-                        #[cfg(feature = "trace")]
-                        {
-                            use tracing::debug;
-                            debug!("無法解析工具調用 #{}", call_id);
-                        }
-                    }
-
-                    current_pos = actual_end;
+                    tool_calls.push(tool_call);
+                    call_id += 1;
                 } else {
                     #[cfg(feature = "trace")]
                     {
                         use tracing::debug;
-                        debug!("找到 <tool_call> 但沒有找到對應的 </tool_call>，停止解析");
+                        debug!("無法解析工具調用 #{}", call_id);
                     }
-                    break;
                 }
-            }
-        } else {
-            #[cfg(feature = "trace")]
-            {
-                use tracing::debug;
-                debug!("文本中沒有找到 <tool_call> 標籤");
+
+                current_pos = actual_end;
+            } else {
+                #[cfg(feature = "trace")]
+                {
+                    use tracing::debug;
+                    debug!("找到 <tool_call> 但沒有找到對應的 </tool_call>，停止解析");
+                }
+                break;
             }
         }
 
@@ -292,7 +371,6 @@ impl XmlToolCallParser {
 
         tool_calls
     }
-
     /// 基於提供的工具定義從文本中解析 XML 工具調用
     pub fn parse_xml_tool_calls_with_tools(text: &str, tools: &[ChatTool]) -> Vec<ChatToolCall> {
         let mut tool_calls = Vec::new();
@@ -302,7 +380,24 @@ impl XmlToolCallParser {
 
         // 如果沒有找到標準格式的工具調用，嘗試基於工具定義的解析
         if tool_calls.is_empty() {
-            tool_calls.extend(Self::parse_tool_specific_xml_format(text, tools));
+            tool_calls.extend(Self::parse_tool_specific_xml_format(text, tools, 1));
+        } else {
+            // 如果已經找到了標準格式的工具調用，但還想嘗試工具特定格式
+            // 使用下一個可用的 ID 來避免重複
+            let next_id = tool_calls.len() as u32 + 1;
+            let additional_calls = Self::parse_tool_specific_xml_format(text, tools, next_id);
+
+            // 只添加那些在標準格式中沒有找到的工具調用
+            for additional_call in additional_calls {
+                let already_exists = tool_calls.iter().any(|existing| {
+                    existing.function.name == additional_call.function.name
+                        && existing.function.arguments == additional_call.function.arguments
+                });
+
+                if !already_exists {
+                    tool_calls.push(additional_call);
+                }
+            }
         }
 
         tool_calls
@@ -314,14 +409,7 @@ impl XmlToolCallParser {
         {
             use tracing::debug;
             debug!("嘗試解析單個工具調用，內容長度: {}", xml_content.len());
-            debug!(
-                "XML 內容預覽: {}",
-                if xml_content.len() > 200 {
-                    &xml_content[..200]
-                } else {
-                    xml_content
-                }
-            );
+            debug!("XML 內容預覽: {}", safe_string_truncate(xml_content, 200));
         }
 
         // 首先嘗試解析 <invoke name="tool_name"> 格式
@@ -453,28 +541,51 @@ impl XmlToolCallParser {
         None
     }
 
-    /// 基於提供的工具定義解析 XML 格式
-    fn parse_tool_specific_xml_format(text: &str, tools: &[ChatTool]) -> Vec<ChatToolCall> {
+    /// 基於提供的工具定義解析 XML 格式，使用指定的起始 ID
+    fn parse_tool_specific_xml_format(
+        text: &str,
+        tools: &[ChatTool],
+        start_id: u32,
+    ) -> Vec<ChatToolCall> {
         let mut tool_calls = Vec::new();
-        let mut call_id = 1;
+        let mut call_id = start_id;
 
         for tool in tools {
-            if let Some(tool_call) = Self::parse_tool_tag(text, &tool.function.name, call_id) {
+            // 解析該工具的所有調用實例
+            let mut current_pos = 0;
+            while let Some(tool_call) =
+                Self::parse_tool_tag_from_position(text, &tool.function.name, call_id, current_pos)
+            {
                 tool_calls.push(tool_call);
                 call_id += 1;
+
+                // 更新搜索位置，避免重複解析同一個工具調用
+                if let Some(start_tag_pos) =
+                    text[current_pos..].find(&format!("<{}>", tool.function.name))
+                {
+                    current_pos += start_tag_pos + format!("<{}>", tool.function.name).len();
+                } else {
+                    break;
+                }
             }
         }
 
         tool_calls
     }
 
-    /// 解析特定工具標籤
-    fn parse_tool_tag(text: &str, tool_name: &str, call_id: u32) -> Option<ChatToolCall> {
+    /// 從指定位置開始解析特定工具標籤
+    fn parse_tool_tag_from_position(
+        text: &str,
+        tool_name: &str,
+        call_id: u32,
+        start_from: usize,
+    ) -> Option<ChatToolCall> {
         let start_tag = format!("<{}>", tool_name);
         let end_tag = format!("</{}>", tool_name);
 
-        if let Some(start_pos) = text.find(&start_tag) {
-            let content_start = start_pos + start_tag.len();
+        if let Some(start_pos) = text[start_from..].find(&start_tag) {
+            let actual_start = start_from + start_pos;
+            let content_start = actual_start + start_tag.len();
             if let Some(end_pos) = text[content_start..].find(&end_tag) {
                 let tool_content = &text[content_start..content_start + end_pos];
                 let arguments = Self::extract_parameters_as_json(tool_content);

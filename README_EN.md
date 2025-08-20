@@ -18,7 +18,7 @@ Add this dependency to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
-poe_api_process = "0.4.1"
+poe_api_process = "0.4.2"
 ```
 
 Or use the cargo command:
@@ -198,7 +198,7 @@ Enable the xml feature to use tool calls in XML format, automatically handling X
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.4.0", features = ["xml"] }
+poe_api_process = { version = "0.4.2", features = ["xml"] }
 ```
 
 ### File Upload and Attachments
@@ -290,7 +290,7 @@ Enable trace functionality for detailed log output:
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.4.0", features = ["trace"] }
+poe_api_process = { version = "0.4.2", features = ["trace"] }
 ```
 
 ## v0.3.0 Version Changes

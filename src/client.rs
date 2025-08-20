@@ -76,6 +76,19 @@ impl PoeClient {
                 request.append_tools_as_xml();
                 request.tools = None; // 清除原始工具定義
             }
+
+            // 如果有工具結果，也需要轉換為 XML 格式並清除原始數據
+            if request.tool_results.is_some() {
+                #[cfg(feature = "trace")]
+                debug!("檢測到 xml feature 啟用，自動將工具結果轉換為 XML 格式");
+
+                // 將工具結果轉換為 XML 格式並附加到訊息末尾
+                request.append_tool_results_as_xml();
+
+                // 清除原始的工具調用和結果，因為已經轉換為 XML 格式
+                request.tool_calls = None;
+                request.tool_results = None;
+            }
         }
 
         let url = format!("{}/bot/{}", self.poe_base_url, self.bot_name);
@@ -84,8 +97,8 @@ impl PoeClient {
 
         #[cfg(feature = "trace")]
         debug!(
-            "發送的請求結構: {}",
-            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "無法序列化請求".to_string())
+            "🔍 發送的完整請求體: {}",
+            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "無法序列化".to_string())
         );
 
         let response = self
@@ -713,8 +726,42 @@ impl PoeClient {
 
         // 創建包含工具結果的新請求
         let mut request = original_request;
-        request.tool_calls = Some(tool_calls);
-        request.tool_results = Some(tool_results);
+
+        // 當啟用 xml feature 時，將工具結果以 XML 格式附加到訊息末尾
+        #[cfg(feature = "xml")]
+        {
+            #[cfg(feature = "trace")]
+            debug!("檢測到 xml feature 啟用，將工具結果轉換為 XML 格式並附加到訊息末尾");
+
+            // 先設置工具調用和結果，以便 XML 轉換方法可以訪問
+            request.tool_calls = Some(tool_calls);
+            request.tool_results = Some(tool_results);
+
+            // 將工具結果轉換為 XML 格式並附加到訊息末尾
+            request.append_tool_results_as_xml();
+
+            // 清除原始的工具調用和結果，因為已經轉換為 XML 格式
+            request.tool_calls = None;
+            request.tool_results = None;
+
+            #[cfg(feature = "trace")]
+            debug!(
+                "🔧 工具結果 XML 轉換完成，檢查訊息內容: {}",
+                request
+                    .query
+                    .iter()
+                    .map(|msg| format!("角色: {}, 內容長度: {}", msg.role, msg.content.len()))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
+
+        // 當未啟用 xml feature 時，使用原有的 JSON API 方式
+        #[cfg(not(feature = "xml"))]
+        {
+            request.tool_calls = Some(tool_calls);
+            request.tool_results = Some(tool_results);
+        }
 
         #[cfg(feature = "trace")]
         debug!(
