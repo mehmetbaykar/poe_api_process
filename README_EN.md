@@ -18,7 +18,7 @@ Add this dependency to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
-poe_api_process = "0.4.0"
+poe_api_process = "0.4.1"
 ```
 
 Or use the cargo command:

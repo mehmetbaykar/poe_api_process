@@ -15,7 +15,7 @@
 在您的 `Cargo.toml` 文件中添加以下依赖：
 ```toml
 [dependencies]
-poe_api_process = "0.4.0"
+poe_api_process = "0.4.1"
 ```
 或使用 cargo 命令添加：
 ```bash
