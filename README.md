@@ -18,7 +18,7 @@
 在您的 `Cargo.toml` 文件中添加以下依賴：
 ```toml
 [dependencies]
-poe_api_process = "0.4.2"
+poe_api_process = "0.4.3"
 ```
 ```
 
@@ -199,7 +199,7 @@ while let Some(response) = stream.next().await {
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.4.2", features = ["xml"] }
+poe_api_process = { version = "0.4.3", features = ["xml"] }
 ```
 
 ### 檔案上傳與使用附件
@@ -291,7 +291,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```toml
 [dependencies]
-poe_api_process = { version = "0.4.2", features = ["trace"] }
+poe_api_process = { version = "0.4.3", features = ["trace"] }
 ```
 
 ## v0.3.0 版本變更

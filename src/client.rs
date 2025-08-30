@@ -205,13 +205,21 @@ impl PoeClient {
                                                 // XML 工具調用檢測和緩衝邏輯
                                                 #[cfg(feature = "xml")]
                                                 {
-                                                    // 將文本添加到 XML 緩衝區
-                                                    xml_text_buffer.push_str(text);
                                                     // 檢查是否開始 XML 工具調用
                                                     if !xml_detection_active && text.contains("<") {
                                                         xml_detection_active = true;
+                                                        xml_text_buffer.clear();
                                                         #[cfg(feature = "trace")]
-                                                        debug!("檢測到 '<' 字符，開始 XML 緩衝");
+                                                        debug!("檢測到 '<' 字符，開始 XML 緩衝 | 清空緩衝區重新開始");
+                                                    }
+                                                    
+                                                    if xml_detection_active {
+                                                        xml_text_buffer.push_str(text);
+                                                        #[cfg(feature = "trace")]
+                                                        debug!("XML 模式：文本已添加到緩衝區 | 長度: {}", xml_text_buffer.len());
+                                                    } else {
+                                                        #[cfg(feature = "trace")]
+                                                        debug!("普通模式：跳過 XML 緩衝 | 文本長度: {}", text.len());
                                                     }
                                                     // 如果正在檢測 XML，檢查是否有完整的工具調用
                                                     if xml_detection_active {

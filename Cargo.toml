@@ -1,6 +1,6 @@
 [package]
 name = "poe_api_process"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 publish = ["crates-io"]
 authors = ["Jerome Leong <jeromeleong1998@gmail.com>"]
