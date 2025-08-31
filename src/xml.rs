@@ -309,13 +309,13 @@ impl XmlToolCallParser {
         {
             use tracing::debug;
             debug!("開始解析 XML 工具調用，文本長度: {}", text.len());
-            debug!("文本內容預覽: {}", safe_string_truncate(text, 300));
+            debug!("文本內容預覽: {}", text);
         }
 
-        // 查找所有的工具調用標籤
-        let mut current_pos = 0;
         let mut call_id = 1;
 
+        // 首先查找 <tool_call> 包裝的工具調用
+        let mut current_pos = 0;
         while let Some(call_start) = text[current_pos..].find("<tool_call>") {
             let actual_start = current_pos + call_start;
 
@@ -357,6 +357,57 @@ impl XmlToolCallParser {
                     debug!("找到 <tool_call> 但沒有找到對應的 </tool_call>，停止解析");
                 }
                 break;
+            }
+        }
+
+        // 如果沒有找到 <tool_call> 包裝的調用，直接查找 <invoke> 標籤
+        if tool_calls.is_empty() {
+            current_pos = 0;
+            while let Some(invoke_start) = text[current_pos..].find("<invoke") {
+                let actual_start = current_pos + invoke_start;
+
+                if let Some(invoke_end) = text[actual_start..].find("</invoke>") {
+                    let actual_end = actual_start + invoke_end + "</invoke>".len();
+                    let invoke_content = &text[actual_start..actual_end];
+
+                    #[cfg(feature = "trace")]
+                    {
+                        use tracing::debug;
+                        debug!(
+                            "找到直接的 invoke 調用 #{}, 開始位置: {}, 結束位置: {}",
+                            call_id, actual_start, actual_end
+                        );
+                        debug!("invoke 調用內容: {}", invoke_content);
+                    }
+
+                    if let Some(tool_call) = Self::parse_single_tool_call(invoke_content, call_id) {
+                        #[cfg(feature = "trace")]
+                        {
+                            use tracing::debug;
+                            debug!(
+                                "成功解析直接 invoke 調用 #{}: {}",
+                                call_id, tool_call.function.name
+                            );
+                        }
+                        tool_calls.push(tool_call);
+                        call_id += 1;
+                    } else {
+                        #[cfg(feature = "trace")]
+                        {
+                            use tracing::debug;
+                            debug!("無法解析直接 invoke 調用 #{}", call_id);
+                        }
+                    }
+
+                    current_pos = actual_end;
+                } else {
+                    #[cfg(feature = "trace")]
+                    {
+                        use tracing::debug;
+                        debug!("找到 <invoke 但沒有找到對應的 </invoke>，停止解析");
+                    }
+                    break;
+                }
             }
         }
 

@@ -131,6 +131,8 @@ impl PoeClient {
         let mut xml_text_buffer = String::new();
         #[cfg(feature = "xml")]
         let mut xml_detection_active = false;
+        #[cfg(feature = "xml")]
+        let available_tools = request.tools.clone().unwrap_or_default();
 
         let stream = response
             .bytes_stream()
@@ -205,32 +207,35 @@ impl PoeClient {
                                                 // XML 工具調用檢測和緩衝邏輯
                                                 #[cfg(feature = "xml")]
                                                 {
-                                                    // 檢查是否開始 XML 工具調用
-                                                    if !xml_detection_active && text.contains("<") {
+                                                    // 基於實際工具定義的智能檢測
+                                                    let should_start_xml_detection = !xml_detection_active && (
+                                                        text.contains("<tool_call>") ||
+                                                        text.contains("<invoke") ||
+                                                        // 檢查是否包含任何已定義的工具名稱標籤
+                                                        available_tools.iter().any(|tool|
+                                                            text.contains(&format!("<{}>", tool.function.name))
+                                                        )
+                                                    );
+                                                    if should_start_xml_detection {
                                                         xml_detection_active = true;
                                                         xml_text_buffer.clear();
                                                         #[cfg(feature = "trace")]
-                                                        debug!("檢測到 '<' 字符，開始 XML 緩衝 | 清空緩衝區重新開始");
+                                                        debug!("檢測到已定義工具的 XML 調用，開始 XML 緩衝 | 清空緩衝區重新開始");
                                                     }
-                                                    
                                                     if xml_detection_active {
                                                         xml_text_buffer.push_str(text);
                                                         #[cfg(feature = "trace")]
                                                         debug!("XML 模式：文本已添加到緩衝區 | 長度: {}", xml_text_buffer.len());
-                                                    } else {
-                                                        #[cfg(feature = "trace")]
-                                                        debug!("普通模式：跳過 XML 緩衝 | 文本長度: {}", text.len());
-                                                    }
-                                                    // 如果正在檢測 XML，檢查是否有完整的工具調用
-                                                    if xml_detection_active {
+                                                        // 檢查是否有完整的工具調用
                                                         let message = ChatMessage {
                                                             role: "assistant".to_string(),
                                                             content: xml_text_buffer.clone(),
                                                             attachments: None,
                                                             content_type: "text/plain".to_string(),
                                                         };
-                                                        if message.contains_xml_tool_calls() {
-                                                            let tool_calls = message.extract_xml_tool_calls();
+                                                        // 使用工具定義來檢測和解析
+                                                        if message.contains_xml_tool_calls_with_tools(&available_tools) {
+                                                            let tool_calls = message.extract_xml_tool_calls_with_tools(&available_tools);
                                                             if !tool_calls.is_empty() {
                                                                 #[cfg(feature = "trace")]
                                                                 debug!("檢測到完整的 XML 工具調用，轉換為標準格式，數量: {}", tool_calls.len());
@@ -258,11 +263,16 @@ impl PoeClient {
                                                                 debug!("XML 工具調用尚未完整，繼續緩衝");
                                                             }
                                                         } else {
-                                                            // 檢查緩衝區是否過大或包含結束標記
-                                                            if xml_text_buffer.len() > 10000 ||
-                                                               (!xml_text_buffer.contains("<tool_call>") &&
-                                                                !xml_text_buffer.contains("<invoke") &&
-                                                                xml_text_buffer.chars().filter(|&c| c == '>').count() > 3) {
+                                                            // 檢查是否應該釋放緩衝區
+                                                            let should_release = xml_text_buffer.contains('\n') &&
+                                                                 xml_text_buffer.len() > 200 &&
+                                                                 !available_tools.iter().any(|tool|
+                                                                     xml_text_buffer.contains(&format!("<{}>", tool.function.name)) ||
+                                                                     xml_text_buffer.contains(&format!("</{}>", tool.function.name))
+                                                                 ) &&
+                                                                 !xml_text_buffer.contains("<tool_call>") &&
+                                                                 !xml_text_buffer.contains("<invoke");
+                                                            if should_release {
                                                                 #[cfg(feature = "trace")]
                                                                 debug!("XML 緩衝區過大或不包含工具調用，發送為普通文本");
                                                                 // 發送緩衝的文本
@@ -427,8 +437,9 @@ impl PoeClient {
                                                     attachments: None,
                                                     content_type: "text/plain".to_string(),
                                                 };
-                                                if message.contains_xml_tool_calls() {
-                                                    let tool_calls = message.extract_xml_tool_calls();
+                                                // 使用工具定義來檢測和解析
+                                                if message.contains_xml_tool_calls_with_tools(&available_tools) {
+                                                    let tool_calls = message.extract_xml_tool_calls_with_tools(&available_tools);
                                                     if !tool_calls.is_empty() {
                                                         #[cfg(feature = "trace")]
                                                         debug!("在完成事件中檢測到 XML 工具調用，數量: {}", tool_calls.len());
