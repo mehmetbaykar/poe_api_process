@@ -2,6 +2,15 @@ use crate::types::{
     ChatMessage, ChatRequest, ChatTool, ChatToolCall, ChatToolResult, FunctionCall,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// 全局工具調用 ID 計數器，確保每個工具調用都有唯一的 ID
+static GLOBAL_CALL_ID: AtomicU64 = AtomicU64::new(1);
+
+// 生成下一個唯一的工具調用 ID
+fn get_next_call_id() -> u64 {
+    GLOBAL_CALL_ID.fetch_add(1, Ordering::SeqCst)
+}
 
 #[cfg(feature = "trace")]
 fn safe_string_truncate(s: &str, max_bytes: usize) -> &str {
@@ -312,8 +321,6 @@ impl XmlToolCallParser {
             debug!("文本內容預覽: {}", text);
         }
 
-        let mut call_id = 1;
-
         // 首先查找 <tool_call> 包裝的工具調用
         let mut current_pos = 0;
         while let Some(call_start) = text[current_pos..].find("<tool_call>") {
@@ -323,29 +330,33 @@ impl XmlToolCallParser {
                 let actual_end = actual_start + call_end + "</tool_call>".len();
                 let call_content = &text[actual_start..actual_end];
 
+                let current_call_id = get_next_call_id();
                 #[cfg(feature = "trace")]
                 {
                     use tracing::debug;
                     debug!(
                         "找到完整的工具調用 #{}, 開始位置: {}, 結束位置: {}",
-                        call_id, actual_start, actual_end
+                        current_call_id, actual_start, actual_end
                     );
                     debug!("工具調用內容: {}", call_content);
                 }
 
-                if let Some(tool_call) = Self::parse_single_tool_call(call_content, call_id) {
+                if let Some(tool_call) = Self::parse_single_tool_call(call_content, current_call_id)
+                {
                     #[cfg(feature = "trace")]
                     {
                         use tracing::debug;
-                        debug!("成功解析工具調用 #{}: {}", call_id, tool_call.function.name);
+                        debug!(
+                            "成功解析工具調用 #{}: {}",
+                            current_call_id, tool_call.function.name
+                        );
                     }
                     tool_calls.push(tool_call);
-                    call_id += 1;
                 } else {
                     #[cfg(feature = "trace")]
                     {
                         use tracing::debug;
-                        debug!("無法解析工具調用 #{}", call_id);
+                        debug!("無法解析工具調用 #{}", current_call_id);
                     }
                 }
 
@@ -370,32 +381,34 @@ impl XmlToolCallParser {
                     let actual_end = actual_start + invoke_end + "</invoke>".len();
                     let invoke_content = &text[actual_start..actual_end];
 
+                    let current_call_id = get_next_call_id();
                     #[cfg(feature = "trace")]
                     {
                         use tracing::debug;
                         debug!(
                             "找到直接的 invoke 調用 #{}, 開始位置: {}, 結束位置: {}",
-                            call_id, actual_start, actual_end
+                            current_call_id, actual_start, actual_end
                         );
                         debug!("invoke 調用內容: {}", invoke_content);
                     }
 
-                    if let Some(tool_call) = Self::parse_single_tool_call(invoke_content, call_id) {
+                    if let Some(tool_call) =
+                        Self::parse_single_tool_call(invoke_content, current_call_id)
+                    {
                         #[cfg(feature = "trace")]
                         {
                             use tracing::debug;
                             debug!(
                                 "成功解析直接 invoke 調用 #{}: {}",
-                                call_id, tool_call.function.name
+                                current_call_id, tool_call.function.name
                             );
                         }
                         tool_calls.push(tool_call);
-                        call_id += 1;
                     } else {
                         #[cfg(feature = "trace")]
                         {
                             use tracing::debug;
-                            debug!("無法解析直接 invoke 調用 #{}", call_id);
+                            debug!("無法解析直接 invoke 調用 #{}", current_call_id);
                         }
                     }
 
@@ -422,6 +435,7 @@ impl XmlToolCallParser {
 
         tool_calls
     }
+
     /// 基於提供的工具定義從文本中解析 XML 工具調用
     pub fn parse_xml_tool_calls_with_tools(text: &str, tools: &[ChatTool]) -> Vec<ChatToolCall> {
         let mut tool_calls = Vec::new();
@@ -431,12 +445,10 @@ impl XmlToolCallParser {
 
         // 如果沒有找到標準格式的工具調用，嘗試基於工具定義的解析
         if tool_calls.is_empty() {
-            tool_calls.extend(Self::parse_tool_specific_xml_format(text, tools, 1));
+            tool_calls.extend(Self::parse_tool_specific_xml_format(text, tools));
         } else {
             // 如果已經找到了標準格式的工具調用，但還想嘗試工具特定格式
-            // 使用下一個可用的 ID 來避免重複
-            let next_id = tool_calls.len() as u32 + 1;
-            let additional_calls = Self::parse_tool_specific_xml_format(text, tools, next_id);
+            let additional_calls = Self::parse_tool_specific_xml_format(text, tools);
 
             // 只添加那些在標準格式中沒有找到的工具調用
             for additional_call in additional_calls {
@@ -455,7 +467,7 @@ impl XmlToolCallParser {
     }
 
     /// 解析單個工具調用
-    fn parse_single_tool_call(xml_content: &str, call_id: u32) -> Option<ChatToolCall> {
+    fn parse_single_tool_call(xml_content: &str, call_id: u64) -> Option<ChatToolCall> {
         #[cfg(feature = "trace")]
         {
             use tracing::debug;
@@ -592,23 +604,20 @@ impl XmlToolCallParser {
         None
     }
 
-    /// 基於提供的工具定義解析 XML 格式，使用指定的起始 ID
-    fn parse_tool_specific_xml_format(
-        text: &str,
-        tools: &[ChatTool],
-        start_id: u32,
-    ) -> Vec<ChatToolCall> {
+    /// 基於提供的工具定義解析 XML 格式
+    fn parse_tool_specific_xml_format(text: &str, tools: &[ChatTool]) -> Vec<ChatToolCall> {
         let mut tool_calls = Vec::new();
-        let mut call_id = start_id;
 
         for tool in tools {
             // 解析該工具的所有調用實例
             let mut current_pos = 0;
-            while let Some(tool_call) =
-                Self::parse_tool_tag_from_position(text, &tool.function.name, call_id, current_pos)
-            {
+            while let Some(tool_call) = Self::parse_tool_tag_from_position(
+                text,
+                &tool.function.name,
+                get_next_call_id(),
+                current_pos,
+            ) {
                 tool_calls.push(tool_call);
-                call_id += 1;
 
                 // 更新搜索位置，避免重複解析同一個工具調用
                 if let Some(start_tag_pos) =
@@ -628,7 +637,7 @@ impl XmlToolCallParser {
     fn parse_tool_tag_from_position(
         text: &str,
         tool_name: &str,
-        call_id: u32,
+        call_id: u64,
         start_from: usize,
     ) -> Option<ChatToolCall> {
         let start_tag = format!("<{}>", tool_name);
