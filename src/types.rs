@@ -65,6 +65,7 @@ pub struct FunctionDefinition {
 pub struct FunctionParameters {
     pub r#type: String,
     pub properties: Value,
+    #[serde(default)]
     pub required: Vec<String>,
 }
 
