@@ -1081,7 +1081,7 @@ impl PoeClient {
         #[cfg(feature = "trace")]
         let duration_ms = response_start_time - request_start_time;
 
-        let status = response.status();
+            let status = response.status();
         
         if !status.is_success() {
             let text = response
@@ -1097,7 +1097,7 @@ impl PoeClient {
             {
                 let response_log = ResponseLog {
                     timestamp: response_start_time,
-                    status_code,
+                    status_code: status.as_u16(),
                     headers: None,
                     body: Some(text.clone()),
                     body_size: Some(text.len()),
@@ -1126,7 +1126,7 @@ impl PoeClient {
         {
             let response_log = ResponseLog {
                 timestamp: response_start_time,
-                status_code,
+                status_code: status.as_u16(),
                 headers: None,
                 body: Some(response_text.clone()),
                 body_size: Some(response_text.len()),
