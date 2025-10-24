@@ -46,8 +46,13 @@ pub struct Attachment {
 // 工具定義相關結構
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatTool {
+    #[serde(default = "default_tool_type")]
     pub r#type: String,
     pub function: FunctionDefinition,
+}
+
+fn default_tool_type() -> String {
+    "function".to_string()
 }
 
 // ChatTool 的FunctionDefinition 結構
@@ -63,24 +68,35 @@ pub struct FunctionDefinition {
 // FunctionDefinition 的FunctionParameters 結構
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionParameters {
+    #[serde(default = "default_parameters_type")]
     pub r#type: String,
     pub properties: Value,
     #[serde(default)]
     pub required: Vec<String>,
 }
 
+fn default_parameters_type() -> String {
+    "object".to_string()
+}
+
 // 工具呼叫相關結構
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatToolCall {
     pub id: String,
+    #[serde(default = "default_tool_call_type")]
     pub r#type: String,
     pub function: FunctionCall,
+}
+
+fn default_tool_call_type() -> String {
+    "function".to_string()
 }
 
 // ChatToolCall 的FunctionCall 結構
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionCall {
     pub name: String,
+    #[serde(default)]
     pub arguments: String,
 }
 
@@ -176,4 +192,98 @@ pub struct FileUploadResponse {
     pub mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    #[test]
+    fn test_tool_deserialization_missing_type_field() {
+        // Test tool without type field (should default to "function")
+        let tool_json = r#"{
+            "function": {
+                "name": "get_weather",
+                "description": "Get the current weather",
+                "parameters": {
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city name"
+                        }
+                    }
+                }
+            }
+        }"#;
+
+        let result: Result<ChatTool, _> = serde_json::from_str(tool_json);
+        assert!(result.is_ok(), "Tool without type field should deserialize successfully");
+
+        let tool = result.unwrap();
+        assert_eq!(tool.r#type, "function");
+        assert_eq!(tool.function.name, "get_weather");
+        assert_eq!(tool.function.description.as_deref(), Some("Get the current weather"));
+
+        if let Some(params) = &tool.function.parameters {
+            assert_eq!(params.r#type, "object");
+            assert_eq!(params.required.len(), 0); // Should default to empty vec
+        }
+    }
+
+    #[test]
+    fn test_tool_deserialization_missing_required_field() {
+        // Test parameters without required field (should default to empty vec)
+        let params_json = r#"{
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "The city name"
+                }
+            }
+        }"#;
+
+        let result: Result<FunctionParameters, _> = serde_json::from_str(params_json);
+        assert!(result.is_ok(), "FunctionParameters without required field should deserialize successfully");
+
+        let params = result.unwrap();
+        assert_eq!(params.r#type, "object");
+        assert_eq!(params.required.len(), 0); // Should default to empty vec
+    }
+
+    #[test]
+    fn test_tool_call_deserialization_missing_type_field() {
+        // Test tool call without type field (should default to "function")
+        let tool_call_json = r#"{
+            "id": "call_123",
+            "function": {
+                "name": "get_weather",
+                "arguments": "{\"location\": \"New York\"}"
+            }
+        }"#;
+
+        let result: Result<ChatToolCall, _> = serde_json::from_str(tool_call_json);
+        assert!(result.is_ok(), "ChatToolCall without type field should deserialize successfully");
+
+        let tool_call = result.unwrap();
+        assert_eq!(tool_call.r#type, "function");
+        assert_eq!(tool_call.id, "call_123");
+        assert_eq!(tool_call.function.name, "get_weather");
+    }
+
+    #[test]
+    fn test_function_call_missing_arguments_field() {
+        // Test function call without arguments field (should default to empty string)
+        let func_call_json = r#"{
+            "name": "get_weather"
+        }"#;
+
+        let result: Result<FunctionCall, _> = serde_json::from_str(func_call_json);
+        assert!(result.is_ok(), "FunctionCall without arguments field should deserialize successfully");
+
+        let func_call = result.unwrap();
+        assert_eq!(func_call.name, "get_weather");
+        assert_eq!(func_call.arguments, ""); // Should default to empty string
+    }
 }
