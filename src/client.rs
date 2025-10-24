@@ -33,9 +33,9 @@ impl PoeClient {
         poe_file_upload_url: &str,
     ) -> Self {
         #[cfg(feature = "trace")]
-        debug!("建立新的 PoeClient 實例，bot_name: {}", bot_name);
+        debug!("Creating new PoeClient instance, bot_name: {}", bot_name);
 
-        // 處理 URL 末尾的斜線
+        // Handle trailing slashes in URLs
         let normalized_base_url = if poe_base_url.ends_with('/') {
             poe_base_url.trim_end_matches('/').to_string()
         } else {
@@ -63,7 +63,7 @@ impl PoeClient {
         #[cfg(not(feature = "xml"))] request: ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("開始串流請求，bot_name: {}", self.bot_name);
+        debug!("Starting stream request, bot_name: {}", self.bot_name);
 
         // 當啟用 xml feature 時，自動將工具轉換為 XML 格式
         #[cfg(feature = "xml")]
