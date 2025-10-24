@@ -1,5 +1,6 @@
 use crate::error::PoeError;
 use crate::types::*;
+use crate::logging::*;
 use futures_util::Stream;
 use futures_util::StreamExt;
 use futures_util::future::join_all;
@@ -23,6 +24,7 @@ pub struct PoeClient {
     access_key: String,
     poe_base_url: String,
     poe_file_upload_url: String,
+    logging_config: LoggingConfig,
 }
 
 impl PoeClient {
@@ -54,7 +56,40 @@ impl PoeClient {
             access_key: access_key.to_string(),
             poe_base_url: normalized_base_url,
             poe_file_upload_url: normalized_file_upload_url,
+            logging_config: LoggingConfig::default(),
         }
+    }
+
+    /// Configure logging settings
+    pub fn with_logging_config(mut self, config: LoggingConfig) -> Self {
+        self.logging_config = config;
+        self
+    }
+
+    /// Get current logging configuration
+    pub fn get_logging_config(&self) -> &LoggingConfig {
+        &self.logging_config
+    }
+
+    /// Update logging configuration
+    pub fn set_logging_config(&mut self, config: LoggingConfig) {
+        self.logging_config = config;
+    }
+
+    /// Helper method to create and log ChatResponse
+    #[cfg(feature = "trace")]
+    #[allow(dead_code)]
+    fn create_and_log_response(&self, event: ChatEventType, data: Option<ChatResponseData>) -> ChatResponse {
+        let response = ChatResponse { event, data };
+        LoggingHelper::log_chat_response(&response);
+        response
+    }
+
+    /// Helper method to create ChatResponse (without logging when trace is disabled)
+    #[cfg(not(feature = "trace"))]
+    #[allow(dead_code)]
+    fn create_and_log_response(&self, event: ChatEventType, data: Option<ChatResponseData>) -> ChatResponse {
+        ChatResponse { event, data }
     }
 
     pub async fn stream_request(
@@ -65,27 +100,31 @@ impl PoeClient {
         #[cfg(feature = "trace")]
         debug!("Starting stream request, bot_name: {}", self.bot_name);
 
-        // 當啟用 xml feature 時，自動將工具轉換為 XML 格式
+        // Log the incoming chat request
+        #[cfg(feature = "trace")]
+        LoggingHelper::log_chat_request(&request);
+
+        // When xml feature is enabled, automatically convert tools to XML format
         #[cfg(feature = "xml")]
         {
             if request.tools.is_some() {
                 #[cfg(feature = "trace")]
-                debug!("檢測到 xml feature 啟用，自動將工具轉換為 XML 格式");
+                debug!("XML feature enabled, automatically converting tools to XML format");
 
-                // 使用 xml 模塊中的方法
+                // Use xml module methods
                 request.append_tools_as_xml();
-                request.tools = None; // 清除原始工具定義
+                request.tools = None; // Clear original tool definitions
             }
 
-            // 如果有工具結果，也需要轉換為 XML 格式並清除原始數據
+            // If there are tool results, also convert to XML format and clear original data
             if request.tool_results.is_some() {
                 #[cfg(feature = "trace")]
-                debug!("檢測到 xml feature 啟用，自動將工具結果轉換為 XML 格式");
+                debug!("XML feature enabled, automatically converting tool results to XML format");
 
-                // 將工具結果轉換為 XML 格式並附加到訊息末尾
+                // Convert tool results to XML format and append to message end
                 request.append_tool_results_as_xml();
 
-                // 清除原始的工具調用和結果，因為已經轉換為 XML 格式
+                // Clear original tool calls and results, as they've been converted to XML format
                 request.tool_calls = None;
                 request.tool_results = None;
             }
@@ -93,12 +132,36 @@ impl PoeClient {
 
         let url = format!("{}/bot/{}", self.poe_base_url, self.bot_name);
         #[cfg(feature = "trace")]
-        debug!("發送請求至 URL: {}", url);
+        debug!("Sending request to URL: {}", url);
+
+        // Prepare request logging
+        #[cfg(feature = "trace")]
+        let request_start_time = LoggingHelper::get_timestamp();
+        #[cfg(not(feature = "trace"))]
+        let _request_start_time = LoggingHelper::get_timestamp();
+        #[cfg(feature = "trace")]
+        let request_body = serde_json::to_string(&request).unwrap_or_else(|_| "Failed to serialize".to_string());
+        
+        #[cfg(feature = "trace")]
+        {
+            let request_log = RequestLog {
+                timestamp: request_start_time,
+                method: "POST".to_string(),
+                url: url.clone(),
+                headers: Some(vec![
+                    ("Authorization".to_string(), "Bearer ***MASKED***".to_string()),
+                    ("Content-Type".to_string(), "application/json".to_string()),
+                ]),
+                body: Some(request_body.clone()),
+                body_size: Some(request_body.len()),
+            };
+            LoggingHelper::log_request(&request_log, &self.logging_config);
+        }
 
         #[cfg(feature = "trace")]
         debug!(
-            "🔍 發送的完整請求體: {}",
-            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "無法序列化".to_string())
+            "🔍 Complete request body sent: {}",
+            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "Failed to serialize".to_string())
         );
 
         let response = self
@@ -109,15 +172,51 @@ impl PoeClient {
             .send()
             .await?;
 
+        #[cfg(feature = "trace")]
+        let response_start_time = LoggingHelper::get_timestamp();
+        #[cfg(not(feature = "trace"))]
+        let _response_start_time = LoggingHelper::get_timestamp();
+        #[cfg(feature = "trace")]
+        let duration_ms = response_start_time - request_start_time;
+
         if !response.status().is_success() {
             let status = response.status();
             #[cfg(feature = "trace")]
-            warn!("API 請求失敗，狀態碼: {}", status);
-            return Err(PoeError::BotError(format!("API 回應狀態碼: {}", status)));
+            warn!("API request failed, status code: {}", status);
+            
+            // Log error response
+            #[cfg(feature = "trace")]
+            {
+                let response_log = ResponseLog {
+                    timestamp: response_start_time,
+                    status_code: status.as_u16(),
+                    headers: None,
+                    body: None,
+                    body_size: None,
+                    duration_ms: Some(duration_ms),
+                };
+                LoggingHelper::log_response(&response_log, &self.logging_config);
+            }
+            
+            return Err(PoeError::BotError(format!("API response status code: {}", status)));
         }
 
         #[cfg(feature = "trace")]
-        debug!("成功接收到串流回應");
+        debug!("Successfully received stream response");
+
+        // Log successful response
+        #[cfg(feature = "trace")]
+        {
+            let response_log = ResponseLog {
+                timestamp: response_start_time,
+                status_code: response.status().as_u16(),
+                headers: None,
+                body: Some("Streaming response".to_string()),
+                body_size: None,
+                duration_ms: Some(duration_ms),
+            };
+            LoggingHelper::log_response(&response_log, &self.logging_config);
+        }
 
         let mut static_buffer = String::new();
         let mut current_event: Option<ChatEventType> = None;
@@ -240,10 +339,10 @@ impl PoeClient {
                                                                 #[cfg(feature = "trace")]
                                                                 debug!("檢測到完整的 XML 工具調用，轉換為標準格式，數量: {}", tool_calls.len());
                                                                 // 發送工具調用事件
-                                                                events.push(Ok(ChatResponse {
-                                                                    event: ChatEventType::Json,
-                                                                    data: Some(ChatResponseData::ToolCalls(tool_calls)),
-                                                                }));
+                                                                events.push(Ok(self.create_and_log_response(
+                                                                    ChatEventType::Json,
+                                                                    Some(ChatResponseData::ToolCalls(tool_calls)),
+                                                                )));
                                                                 // 移除 XML 部分並發送剩餘文本
                                                                 let clean_text = Self::remove_xml_tool_calls(&xml_text_buffer);
                                                                 if !clean_text.trim().is_empty() {
@@ -932,13 +1031,35 @@ impl PoeClient {
         Ok(upload_responses)
     }
 
-    /// 發送檔案上傳請求 (內部方法)
+    /// Send file upload request (internal method)
     async fn send_upload_request(
         &self,
         form: reqwest::multipart::Form,
     ) -> Result<FileUploadResponse, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("發送檔案上傳請求至 {}", self.poe_file_upload_url);
+        debug!("Sending file upload request to {}", self.poe_file_upload_url);
+
+        // Prepare request logging
+        #[cfg(feature = "trace")]
+        let request_start_time = LoggingHelper::get_timestamp();
+        #[cfg(not(feature = "trace"))]
+        let _request_start_time = LoggingHelper::get_timestamp();
+        
+        #[cfg(feature = "trace")]
+        {
+            let request_log = RequestLog {
+                timestamp: request_start_time,
+                method: "POST".to_string(),
+                url: self.poe_file_upload_url.clone(),
+                headers: Some(vec![
+                    ("Authorization".to_string(), "Bearer ***MASKED***".to_string()),
+                    ("Content-Type".to_string(), "multipart/form-data".to_string()),
+                ]),
+                body: Some("Multipart form data".to_string()),
+                body_size: None,
+            };
+            LoggingHelper::log_request(&request_log, &self.logging_config);
+        }
 
         let response = self
             .client
@@ -949,34 +1070,69 @@ impl PoeClient {
             .await
             .map_err(|e| {
                 #[cfg(feature = "trace")]
-                warn!("檔案上傳請求失敗: {}", e);
+                warn!("File upload request failed: {}", e);
                 PoeError::RequestFailed(e)
             })?;
+
+        #[cfg(feature = "trace")]
+        let response_start_time = LoggingHelper::get_timestamp();
+        #[cfg(not(feature = "trace"))]
+        let _response_start_time = LoggingHelper::get_timestamp();
+        #[cfg(feature = "trace")]
+        let duration_ms = response_start_time - request_start_time;
 
         if !response.status().is_success() {
             let status = response.status();
             let text = response
                 .text()
                 .await
-                .unwrap_or_else(|_| "無法讀取回應內容".to_string());
+                .unwrap_or_else(|_| "Unable to read response content".to_string());
 
             #[cfg(feature = "trace")]
-            warn!("檔案上傳API回應錯誤 - 狀態碼: {}, 內容: {}", status, text);
+            warn!("File upload API response error - status code: {}, content: {}", status, text);
+
+            // Log error response
+            #[cfg(feature = "trace")]
+            {
+                let response_log = ResponseLog {
+                    timestamp: response_start_time,
+                    status_code: status.as_u16(),
+                    headers: None,
+                    body: Some(text.clone()),
+                    body_size: Some(text.len()),
+                    duration_ms: Some(duration_ms),
+                };
+                LoggingHelper::log_response(&response_log, &self.logging_config);
+            }
 
             return Err(PoeError::FileUploadFailed(format!(
-                "上傳失敗 - 狀態碼: {}, 內容: {}",
+                "Upload failed - status code: {}, content: {}",
                 status, text
             )));
         }
 
         #[cfg(feature = "trace")]
-        debug!("成功接收到檔案上傳回應");
+        debug!("Successfully received file upload response");
 
         let response_text = response.text().await.map_err(|e| {
             #[cfg(feature = "trace")]
-            warn!("讀取檔案上傳回應內容失敗: {}", e);
+            warn!("Failed to read file upload response content: {}", e);
             PoeError::RequestFailed(e)
         })?;
+
+        // Log successful response
+        #[cfg(feature = "trace")]
+        {
+            let response_log = ResponseLog {
+                timestamp: response_start_time,
+                status_code: response.status().as_u16(),
+                headers: None,
+                body: Some(response_text.clone()),
+                body_size: Some(response_text.len()),
+                duration_ms: Some(duration_ms),
+            };
+            LoggingHelper::log_response(&response_log, &self.logging_config);
+        }
 
         #[cfg(feature = "trace")]
         debug!("檔案上傳回應內容: {}", response_text);
