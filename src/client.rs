@@ -96,7 +96,7 @@ impl PoeClient {
         &self,
         #[cfg(feature = "xml")] mut request: ChatRequest,
         #[cfg(not(feature = "xml"))] request: ChatRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send + '_>>, PoeError> {
         #[cfg(feature = "trace")]
         debug!("Starting stream request, bot_name: {}", self.bot_name);
 
@@ -838,7 +838,7 @@ impl PoeClient {
         original_request: ChatRequest,
         tool_calls: Vec<ChatToolCall>,
         tool_results: Vec<ChatToolResult>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send + '_>>, PoeError> {
         #[cfg(feature = "trace")]
         debug!("發送工具調用結果，bot_name: {}", self.bot_name);
 
@@ -1081,8 +1081,9 @@ impl PoeClient {
         #[cfg(feature = "trace")]
         let duration_ms = response_start_time - request_start_time;
 
-        if !response.status().is_success() {
-            let status = response.status();
+        let status = response.status();
+        
+        if !status.is_success() {
             let text = response
                 .text()
                 .await
@@ -1096,7 +1097,7 @@ impl PoeClient {
             {
                 let response_log = ResponseLog {
                     timestamp: response_start_time,
-                    status_code: status.as_u16(),
+                    status_code,
                     headers: None,
                     body: Some(text.clone()),
                     body_size: Some(text.len()),
@@ -1125,7 +1126,7 @@ impl PoeClient {
         {
             let response_log = ResponseLog {
                 timestamp: response_start_time,
-                status_code: response.status().as_u16(),
+                status_code,
                 headers: None,
                 body: Some(response_text.clone()),
                 body_size: Some(response_text.len()),

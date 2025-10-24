@@ -222,7 +222,7 @@ impl LoggingHelper {
 }
 
 #[cfg(feature = "trace")]
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error};
 
 #[cfg(feature = "trace")]
 impl LoggingHelper {
