@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-// Bot Chat 請求結構
+// Bot Chat Request structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatRequest {
     pub version: String,
@@ -25,7 +25,7 @@ pub struct ChatRequest {
     pub stop_sequences: Option<Vec<String>>,
 }
 
-// 消息結構
+// Message structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
@@ -35,7 +35,7 @@ pub struct ChatMessage {
     pub content_type: String,
 }
 
-// ChatMessage 的Attachment 結構
+// Attachment structure for ChatMessage
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Attachment {
     pub url: String,
@@ -43,14 +43,14 @@ pub struct Attachment {
     pub content_type: Option<String>,
 }
 
-// 工具定義相關結構
+// Tool definition related structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatTool {
     pub r#type: String,
     pub function: FunctionDefinition,
 }
 
-// ChatTool 的FunctionDefinition 結構
+// FunctionDefinition structure for ChatTool
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionDefinition {
     pub name: String,
@@ -60,7 +60,7 @@ pub struct FunctionDefinition {
     pub parameters: Option<FunctionParameters>,
 }
 
-// FunctionDefinition 的FunctionParameters 結構
+// FunctionParameters structure for FunctionDefinition
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionParameters {
     pub r#type: String,
@@ -68,7 +68,7 @@ pub struct FunctionParameters {
     pub required: Vec<String>,
 }
 
-// 工具呼叫相關結構
+// Tool call related structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatToolCall {
     pub id: String,
@@ -76,14 +76,14 @@ pub struct ChatToolCall {
     pub function: FunctionCall,
 }
 
-// ChatToolCall 的FunctionCall 結構
+// FunctionCall structure for ChatToolCall
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
 }
 
-// 工具呼叫結果
+// Tool call result
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatToolResult {
     pub role: String,
@@ -92,7 +92,7 @@ pub struct ChatToolResult {
     pub content: String,
 }
 
-// 用於追蹤部分工具呼叫
+// Used to track partial tool calls
 #[derive(Debug, Clone, Default)]
 pub struct PartialToolCall {
     pub id: String,
@@ -101,7 +101,7 @@ pub struct PartialToolCall {
     pub function_arguments: String,
 }
 
-// 事件響應
+// Event response
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatResponse {
     pub event: ChatEventType,
@@ -109,7 +109,7 @@ pub struct ChatResponse {
     pub data: Option<ChatResponseData>,
 }
 
-// 事件類型
+// Event type
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum ChatEventType {
     Text,
@@ -120,7 +120,7 @@ pub enum ChatEventType {
     Error,
 }
 
-// 檔案數據結構
+// File data structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileData {
     pub url: String,
@@ -129,7 +129,7 @@ pub struct FileData {
     pub inline_ref: String,
 }
 
-// 響應資料的可能類型
+// Possible types of response data
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ChatResponseData {
@@ -145,7 +145,7 @@ pub struct ModelResponse {
     pub data: Vec<ModelInfo>,
 }
 
-// 模型信息
+// Model information
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
@@ -154,7 +154,7 @@ pub struct ModelInfo {
     pub owned_by: String,
 }
 
-// 文件上傳請求結構
+// File upload request structure
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FileUploadRequest {
@@ -167,7 +167,7 @@ pub enum FileUploadRequest {
     },
 }
 
-// 文件上傳響應結構
+// File upload response structure
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileUploadResponse {
     pub attachment_url: String,

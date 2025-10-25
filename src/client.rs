@@ -1,5 +1,7 @@
 use crate::error::PoeError;
 use crate::types::*;
+#[cfg(feature = "trace")]
+use crate::logging::{redact_header, truncate_str_by_bytes, loggable_request_json};
 use futures_util::Stream;
 use futures_util::StreamExt;
 use futures_util::future::join_all;
@@ -33,9 +35,9 @@ impl PoeClient {
         poe_file_upload_url: &str,
     ) -> Self {
         #[cfg(feature = "trace")]
-        debug!("建立新的 PoeClient 實例，bot_name: {}", bot_name);
+        debug!("Creating new PoeClient instance, bot_name: {}", bot_name);
 
-        // 處理 URL 末尾的斜線
+        // Handle trailing slashes in URLs
         let normalized_base_url = if poe_base_url.ends_with('/') {
             poe_base_url.trim_end_matches('/').to_string()
         } else {
@@ -63,42 +65,62 @@ impl PoeClient {
         #[cfg(not(feature = "xml"))] request: ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("開始串流請求，bot_name: {}", self.bot_name);
+        debug!("Starting streaming request, bot_name: {}", self.bot_name);
 
-        // 當啟用 xml feature 時，自動將工具轉換為 XML 格式
+        // When xml feature is enabled, automatically convert tools to XML format
         #[cfg(feature = "xml")]
         {
             if request.tools.is_some() {
                 #[cfg(feature = "trace")]
-                debug!("檢測到 xml feature 啟用，自動將工具轉換為 XML 格式");
+                debug!("XML feature detected, automatically converting tools to XML format");
 
-                // 使用 xml 模塊中的方法
+                // Use methods from xml module
                 request.append_tools_as_xml();
-                request.tools = None; // 清除原始工具定義
+                request.tools = None; // Clear original tool definitions
             }
 
-            // 如果有工具結果，也需要轉換為 XML 格式並清除原始數據
+            // If there are tool results, also convert to XML format and clear original data
             if request.tool_results.is_some() {
                 #[cfg(feature = "trace")]
-                debug!("檢測到 xml feature 啟用，自動將工具結果轉換為 XML 格式");
+                debug!("XML feature detected, automatically converting tool results to XML format");
 
-                // 將工具結果轉換為 XML 格式並附加到訊息末尾
+                // Convert tool results to XML format and append to end of message
                 request.append_tool_results_as_xml();
 
-                // 清除原始的工具調用和結果，因為已經轉換為 XML 格式
+                // Clear original tool calls and results since they are converted to XML format
                 request.tool_calls = None;
                 request.tool_results = None;
             }
         }
 
         let url = format!("{}/bot/{}", self.poe_base_url, self.bot_name);
+        
         #[cfg(feature = "trace")]
-        debug!("發送請求至 URL: {}", url);
+        debug!("Sending request to URL: {}", url);
+
+        // Log outbound request with structured data
+        #[cfg(feature = "trace")]
+        {
+            let request_json = serde_json::to_value(&request).unwrap_or(Value::Null);
+            let loggable_request = loggable_request_json(&request_json, 64 * 1024); // 64KB max
+            
+            // Create redacted headers map
+            let mut headers_map = std::collections::HashMap::new();
+            headers_map.insert("Authorization", redact_header("Authorization", "<Bearer token>"));
+            headers_map.insert("Content-Type", "application/json".to_string());
+            
+            debug!("outbound_request method={}, url={}, headers_redacted={:?}, body_pretty={}", 
+                "POST",
+                url.as_str(),
+                headers_map,
+                serde_json::to_string_pretty(&loggable_request).unwrap_or_else(|_| "Failed to serialize".to_string())
+            );
+        }
 
         #[cfg(feature = "trace")]
         debug!(
-            "🔍 發送的完整請求體: {}",
-            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "無法序列化".to_string())
+            "🔍 Full request body being sent: {}",
+            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "Failed to serialize".to_string())
         );
 
         let response = self
@@ -112,21 +134,21 @@ impl PoeClient {
         if !response.status().is_success() {
             let status = response.status();
             #[cfg(feature = "trace")]
-            warn!("API 請求失敗，狀態碼: {}", status);
-            return Err(PoeError::BotError(format!("API 回應狀態碼: {}", status)));
+            warn!("API request failed, status code: {}", status);
+            return Err(PoeError::BotError(format!("API response status code: {}", status)));
         }
 
         #[cfg(feature = "trace")]
-        debug!("成功接收到串流回應");
+        debug!("Successfully received streaming response");
 
         let mut static_buffer = String::new();
         let mut current_event: Option<ChatEventType> = None;
         let mut is_collecting_data = false;
-        // 用於累積 tool_calls 的狀態
+        // State for accumulating tool_calls
         let mut accumulated_tool_calls: Vec<PartialToolCall> = Vec::new();
         let mut tool_calls_complete = false;
 
-        // XML 工具調用緩衝和檢測狀態
+        // XML tool call buffering and detection state
         #[cfg(feature = "xml")]
         let mut xml_text_buffer = String::new();
         #[cfg(feature = "xml")]
@@ -140,19 +162,19 @@ impl PoeClient {
                 result.map_err(PoeError::from).map(|chunk| {
                     let chunk_str = String::from_utf8_lossy(&chunk);
                     #[cfg(feature = "trace")]
-                    debug!("處理串流塊，大小: {} 字節", chunk.len());
+                    debug!("Processing stream chunk, size: {} bytes", chunk.len());
 
                     let mut events = Vec::new();
-                    // 將新的塊添加到靜態緩衝區
+                    // Add new chunk to static buffer
                     static_buffer.push_str(&chunk_str);
 
-                    // 尋找完整的消息
+                    // Find complete messages
                     while let Some(newline_pos) = static_buffer.find('\n') {
                         let line = static_buffer[..newline_pos].trim().to_string();
                         static_buffer = static_buffer[newline_pos + 1..].to_string();
 
                         if line.is_empty() {
-                            // 重置當前事件狀態，準備處理下一個事件
+                            // Reset current event state, prepare to process next event
                             current_event = None;
                             is_collecting_data = false;
                             continue;
@@ -160,14 +182,14 @@ impl PoeClient {
 
                         if line == ": ping" {
                             #[cfg(feature = "trace")]
-                            debug!("收到 ping 訊號");
+                            debug!("Received ping signal");
                             continue;
                         }
 
                         if line.starts_with("event: ") {
                             let event_name = line.trim_start_matches("event: ").trim();
                             #[cfg(feature = "trace")]
-                            debug!("解析事件類型: {}", event_name);
+                            debug!("Parsing event type: {}", event_name);
 
                             let event_type = match event_name {
                                 "text" => ChatEventType::Text,
@@ -178,7 +200,7 @@ impl PoeClient {
                                 "error" => ChatEventType::Error,
                                 _ => {
                                     #[cfg(feature = "trace")]
-                                    warn!("收到未知事件類型: {}", event_name);
+                                    warn!("Received unknown event type: {}", event_name);
                                     continue;
                                 }
                             };
@@ -192,7 +214,7 @@ impl PoeClient {
                             let data = line.trim_start_matches("data: ").trim();
                             #[cfg(feature = "trace")]
                             debug!(
-                                "收到事件數據: {}",
+                                "Received event data: {}",
                                 if data.len() > 100 { &data[..100] } else { data }
                             );
 
@@ -202,16 +224,28 @@ impl PoeClient {
                                         if let Ok(json) = serde_json::from_str::<Value>(data) {
                                             if let Some(text) = json.get("text").and_then(Value::as_str) {
                                                 #[cfg(feature = "trace")]
-                                                debug!("解析到文本數據，長度: {}", text.len());
+                                                debug!("Parsed text data, length: {}", text.len());
 
-                                                // XML 工具調用檢測和緩衝邏輯
+                                                // Log text event with potential truncation
+                                                #[cfg(feature = "trace")]
+                                                {
+                                                    let (truncated_text, was_truncated) = truncate_str_by_bytes(text, 64 * 1024);
+                                                    let loggable_text = if was_truncated { truncated_text } else { text.to_string() };
+                                                    debug!("incoming_text_event event_type={:?}, text_preview={}, original_length={}", 
+                                                        event_type,
+                                                        loggable_text.as_str(),
+                                                        text.len()
+                                                    );
+                                                }
+
+                                                // XML tool call detection and buffering logic
                                                 #[cfg(feature = "xml")]
                                                 {
-                                                    // 基於實際工具定義的智能檢測
+                                                    // Smart detection based on actual tool definitions
                                                     let should_start_xml_detection = !xml_detection_active && (
-                                                        text.contains("<tool_call>") ||
+                                                        text.contains("<function_call>") ||
                                                         text.contains("<invoke") ||
-                                                        // 檢查是否包含任何已定義的工具名稱標籤
+                                                        // Check if any defined tool name tags are present
                                                         available_tools.iter().any(|tool|
                                                             text.contains(&format!("<{}>", tool.function.name))
                                                         )
@@ -220,31 +254,31 @@ impl PoeClient {
                                                         xml_detection_active = true;
                                                         xml_text_buffer.clear();
                                                         #[cfg(feature = "trace")]
-                                                        debug!("檢測到已定義工具的 XML 調用，開始 XML 緩衝 | 清空緩衝區重新開始");
+                                                        debug!("Detected XML tool call with defined tools, starting XML buffering | Clearing buffer to restart");
                                                     }
                                                     if xml_detection_active {
                                                         xml_text_buffer.push_str(text);
                                                         #[cfg(feature = "trace")]
-                                                        debug!("XML 模式：文本已添加到緩衝區 | 長度: {}", xml_text_buffer.len());
-                                                        // 檢查是否有完整的工具調用
+                                                        debug!("XML mode: Text added to buffer | Length: {}", xml_text_buffer.len());
+                                                        // Check for complete tool calls
                                                         let message = ChatMessage {
                                                             role: "assistant".to_string(),
                                                             content: xml_text_buffer.clone(),
                                                             attachments: None,
                                                             content_type: "text/plain".to_string(),
                                                         };
-                                                        // 使用工具定義來檢測和解析
+                                                        // Use tool definitions to detect and parse
                                                         if message.contains_xml_tool_calls_with_tools(&available_tools) {
                                                             let tool_calls = message.extract_xml_tool_calls_with_tools(&available_tools);
                                                             if !tool_calls.is_empty() {
                                                                 #[cfg(feature = "trace")]
-                                                                debug!("檢測到完整的 XML 工具調用，轉換為標準格式，數量: {}", tool_calls.len());
-                                                                // 發送工具調用事件
+                                                                debug!("Detected complete XML tool calls, converting to standard format, count: {}", tool_calls.len());
+                                                                // Send tool call event
                                                                 events.push(Ok(ChatResponse {
                                                                     event: ChatEventType::Json,
                                                                     data: Some(ChatResponseData::ToolCalls(tool_calls)),
                                                                 }));
-                                                                // 移除 XML 部分並發送剩餘文本
+                                                                // Remove XML part and send remaining text
                                                                 let clean_text = Self::remove_xml_tool_calls(&xml_text_buffer);
                                                                 if !clean_text.trim().is_empty() {
                                                                     events.push(Ok(ChatResponse {
@@ -254,45 +288,45 @@ impl PoeClient {
                                                                         }),
                                                                     }));
                                                                 }
-                                                                // 重置 XML 緩衝狀態
+                                                                // Reset XML buffer state
                                                                 xml_text_buffer.clear();
                                                                 xml_detection_active = false;
                                                             } else {
-                                                                // 沒有完整的工具調用，繼續緩衝
+                                                                // No complete tool calls, continue buffering
                                                                 #[cfg(feature = "trace")]
-                                                                debug!("XML 工具調用尚未完整，繼續緩衝");
+                                                                debug!("XML tool calls not yet complete, continuing buffering");
                                                             }
                                                         } else {
-                                                            // 檢查是否應該釋放緩衝區
+                                                            // Check if buffer should be released
                                                             let should_release = xml_text_buffer.contains('\n') &&
                                                                  xml_text_buffer.len() > 200 &&
                                                                  !available_tools.iter().any(|tool|
                                                                      xml_text_buffer.contains(&format!("<{}>", tool.function.name)) ||
                                                                      xml_text_buffer.contains(&format!("</{}>", tool.function.name))
                                                                  ) &&
-                                                                 !xml_text_buffer.contains("<tool_call>") &&
+                                                                 !xml_text_buffer.contains("<function_call>") &&
                                                                  !xml_text_buffer.contains("<invoke");
                                                             if should_release {
                                                                 #[cfg(feature = "trace")]
-                                                                debug!("XML 緩衝區過大或不包含工具調用，發送為普通文本");
-                                                                // 發送緩衝的文本
+                                                                debug!("XML buffer too large or no tool calls, sending as plain text");
+                                                                // Send buffered text
                                                                 events.push(Ok(ChatResponse {
                                                                     event: event_type.clone(),
                                                                     data: Some(ChatResponseData::Text {
                                                                         text: xml_text_buffer.clone(),
                                                                     }),
                                                                 }));
-                                                                // 重置緩衝狀態
+                                                                // Reset buffer state
                                                                 xml_text_buffer.clear();
                                                                 xml_detection_active = false;
                                                             } else {
-                                                                // 繼續緩衝
+                                                                // Continue buffering
                                                                 #[cfg(feature = "trace")]
-                                                                debug!("繼續緩衝 XML 文本，當前長度: {}", xml_text_buffer.len());
+                                                                debug!("Continuing to buffer XML text, current length: {}", xml_text_buffer.len());
                                                             }
                                                         }
                                                     } else {
-                                                        // 沒有檢測到 XML，直接發送文本
+                                                        // No XML detected, send text directly
                                                         events.push(Ok(ChatResponse {
                                                             event: event_type.clone(),
                                                             data: Some(ChatResponseData::Text {
@@ -314,29 +348,48 @@ impl PoeClient {
                                             }
                                         } else {
                                             #[cfg(feature = "trace")]
-                                            debug!("JSON 解析失敗，可能是不完整的數據，等待更多數據");
+                                            debug!("JSON parsing failed, might be incomplete data, waiting for more data");
                                             is_collecting_data = true;
                                         }
                                     }
                                     ChatEventType::File => {
                                         if let Ok(file_data) = serde_json::from_str::<FileData>(data) {
                                             #[cfg(feature = "trace")]
-                                            debug!("解析到文件數據: {}", file_data.name);
+                                            debug!("Parsed file data: {}", file_data.name);
+                                            
+                                            // Log file event
+                                            #[cfg(feature = "trace")]
+                                            debug!("incoming_file_event file_name={}, content_type={}, url_length={}", 
+                                                file_data.name.as_str(),
+                                                file_data.content_type.as_str(),
+                                                file_data.url.len()
+                                            );
+                                            
                                             events.push(Ok(ChatResponse {
                                                 event: ChatEventType::File,
                                                 data: Some(ChatResponseData::File(file_data)),
                                             }));
                                         } else {
                                             #[cfg(feature = "trace")]
-                                            debug!("文件數據 JSON 解析失敗，可能是不完整的數據，等待更多數據");
+                                            debug!("File data JSON parsing failed, might be incomplete data, waiting for more data");
                                             is_collecting_data = true;
                                         }
                                     }
                                     ChatEventType::Json => {
                                         if let Ok(json) = serde_json::from_str::<Value>(data) {
                                             #[cfg(feature = "trace")]
-                                            debug!("解析到 JSON 事件數據");
-                                            // 檢查是否有 finish_reason: "tool_calls"，表示工具調用完成
+                                            debug!("Parsed JSON event data");
+                                            
+                                            // Log JSON event data with truncation
+                                            #[cfg(feature = "trace")]
+                                            {
+                                                let loggable_json = crate::logging::truncate_text_fields(&json, 64 * 1024);
+                                                debug!("incoming_json_event json_pretty={}", 
+                                                    serde_json::to_string_pretty(&loggable_json).unwrap_or_else(|_| "Failed to serialize".to_string())
+                                                );
+                                            }
+                                            
+                                            // Check for finish_reason: "tool_calls", indicating tool calls are complete
                                             let finish_reason = json
                                                 .get("choices")
                                                 .and_then(|choices| choices.get(0))
@@ -345,11 +398,11 @@ impl PoeClient {
 
                                             if finish_reason == Some("tool_calls") {
                                                 #[cfg(feature = "trace")]
-                                                debug!("檢測到工具調用完成標誌");
+                                                debug!("Detected tool call completion flag");
                                                 tool_calls_complete = true;
                                             }
 
-                                            // 檢查是否包含 tool_calls delta
+                                            // Check for tool_calls delta
                                             let tool_calls_delta = json
                                                 .get("choices")
                                                 .and_then(|choices| choices.get(0))
@@ -358,8 +411,8 @@ impl PoeClient {
 
                                             if let Some(tool_calls_array) = tool_calls_delta {
                                                 #[cfg(feature = "trace")]
-                                                debug!("檢測到工具調用 delta");
-                                                // 處理每個工具調用的 delta
+                                                debug!("Detected tool call delta");
+                                                // Process each tool call delta
                                                 if let Some(tool_calls) = tool_calls_array.as_array() {
                                                     for tool_call_delta in tool_calls {
                                                         let index = tool_call_delta
@@ -368,12 +421,12 @@ impl PoeClient {
                                                             .unwrap_or(0)
                                                             as usize;
 
-                                                        // 確保 accumulated_tool_calls 有足夠的元素
+                                                        // Ensure accumulated_tool_calls has enough elements
                                                         while accumulated_tool_calls.len() <= index {
                                                             accumulated_tool_calls.push(PartialToolCall::default());
                                                         }
 
-                                                        // 更新 id 和 type
+                                                        // Update id and type
                                                         if let Some(id) = tool_call_delta
                                                             .get("id")
                                                             .and_then(Value::as_str)
@@ -388,7 +441,7 @@ impl PoeClient {
                                                             accumulated_tool_calls[index].r#type = type_str.to_string();
                                                         }
 
-                                                        // 更新 function 相關欄位
+                                                        // Update function-related fields
                                                         if let Some(function) = tool_call_delta.get("function") {
                                                             if let Some(name) = function
                                                                 .get("name")
@@ -407,8 +460,8 @@ impl PoeClient {
                                                     }
                                                 }
                                             } else if !tool_calls_complete {
-                                                // 如果沒有 tool_calls delta 且工具調用尚未完成，
-                                                // 則按一般 JSON 處理
+                                                // If no tool_calls delta and tool calls are not complete,
+                                                // process as general JSON
                                                 events.push(Ok(ChatResponse {
                                                     event: ChatEventType::Json,
                                                     data: Some(ChatResponseData::Text {
@@ -418,37 +471,42 @@ impl PoeClient {
                                             }
                                         } else {
                                             #[cfg(feature = "trace")]
-                                            debug!("JSON 事件解析失敗，可能是不完整的數據");
+                                            debug!("JSON event parsing failed, might be incomplete data");
                                             is_collecting_data = true;
                                         }
                                     }
                                     ChatEventType::Done => {
                                         #[cfg(feature = "trace")]
-                                        debug!("收到完成事件");
-                                        // 處理任何剩餘的 XML 緩衝內容
+                                        debug!("Received done event");
+                                        
+                                        // Log done event
+                                        #[cfg(feature = "trace")]
+                                        debug!("incoming_done_event event_type=done");
+                                        
+                                        // Process any remaining XML buffer content
                                         #[cfg(feature = "xml")]
                                         {
                                             if xml_detection_active && !xml_text_buffer.trim().is_empty() {
                                                 #[cfg(feature = "trace")]
-                                                debug!("處理剩餘的 XML 緩衝內容，長度: {}", xml_text_buffer.len());
+                                                debug!("Processing remaining XML buffer content, length: {}", xml_text_buffer.len());
                                                 let message = ChatMessage {
                                                     role: "assistant".to_string(),
                                                     content: xml_text_buffer.clone(),
                                                     attachments: None,
                                                     content_type: "text/plain".to_string(),
                                                 };
-                                                // 使用工具定義來檢測和解析
+                                                // Use tool definitions to detect and parse
                                                 if message.contains_xml_tool_calls_with_tools(&available_tools) {
                                                     let tool_calls = message.extract_xml_tool_calls_with_tools(&available_tools);
                                                     if !tool_calls.is_empty() {
                                                         #[cfg(feature = "trace")]
-                                                        debug!("在完成事件中檢測到 XML 工具調用，數量: {}", tool_calls.len());
-                                                        // 發送工具調用事件
+                                                        debug!("Detected XML tool calls in done event, count: {}", tool_calls.len());
+                                                        // Send tool call event
                                                         events.push(Ok(ChatResponse {
                                                             event: ChatEventType::Json,
                                                             data: Some(ChatResponseData::ToolCalls(tool_calls)),
                                                         }));
-                                                        // 發送清理後的文本（如果有）
+                                                        // Send cleaned text (if any)
                                                         let clean_text = Self::remove_xml_tool_calls(&xml_text_buffer);
                                                         if !clean_text.trim().is_empty() {
                                                             events.push(Ok(ChatResponse {
@@ -459,7 +517,7 @@ impl PoeClient {
                                                             }));
                                                         }
                                                     } else {
-                                                        // 發送為普通文本
+                                                        // Send as plain text
                                                         events.push(Ok(ChatResponse {
                                                             event: ChatEventType::Text,
                                                             data: Some(ChatResponseData::Text {
@@ -468,7 +526,7 @@ impl PoeClient {
                                                         }));
                                                     }
                                                 } else {
-                                                    // 發送為普通文本
+                                                    // Send as plain text
                                                     events.push(Ok(ChatResponse {
                                                         event: ChatEventType::Text,
                                                         data: Some(ChatResponseData::Text {
@@ -476,7 +534,7 @@ impl PoeClient {
                                                         }),
                                                     }));
                                                 }
-                                                // 清理緩衝狀態
+                                                // Clear buffer state
                                                 xml_text_buffer.clear();
                                                 xml_detection_active = false;
                                             }
@@ -492,14 +550,21 @@ impl PoeClient {
                                             let text = json
                                                 .get("text")
                                                 .and_then(Value::as_str)
-                                                .unwrap_or("未知錯誤");
+                                                .unwrap_or("Unknown error");
                                             let allow_retry = json
                                                 .get("allow_retry")
                                                 .and_then(Value::as_bool)
                                                 .unwrap_or(false);
 
                                             #[cfg(feature = "trace")]
-                                            warn!("收到錯誤事件: {}, 可重試: {}", text, allow_retry);
+                                            warn!("Received error event: {}, Retryable: {}", text, allow_retry);
+                                            
+                                            // Log error event
+                                            #[cfg(feature = "trace")]
+                                            debug!("incoming_error_event error_text={}, retryable={}", 
+                                                text,
+                                                allow_retry
+                                            );
 
                                             events.push(Ok(ChatResponse {
                                                 event: ChatEventType::Error,
@@ -510,19 +575,19 @@ impl PoeClient {
                                             }));
                                         } else {
                                             #[cfg(feature = "trace")]
-                                            warn!("無法解析錯誤事件數據: {}", data);
+                                            warn!("Could not parse error event data: {}", data);
                                         }
                                         current_event = None;
                                     }
                                 }
                             } else {
                                 #[cfg(feature = "trace")]
-                                debug!("收到數據但沒有當前事件類型");
+                                debug!("Received data but no current event type");
                             }
                         } else if is_collecting_data {
-                            // 嘗試解析累積的 JSON
+                            // Attempt to parse accumulated JSON
                             #[cfg(feature = "trace")]
-                            debug!("嘗試解析未完整的 JSON 數據: {}", line);
+                            debug!("Attempting to parse incomplete JSON data: {}", line);
 
                             if let Some(ref event_type) = current_event {
                                 match event_type {
@@ -530,7 +595,7 @@ impl PoeClient {
                                         if let Ok(json) = serde_json::from_str::<Value>(&line) {
                                             if let Some(text) = json.get("text").and_then(Value::as_str) {
                                                 #[cfg(feature = "trace")]
-                                                debug!("成功解析到累積的 JSON 文本，長度: {}", text.len());
+                                                debug!("Successfully parsed accumulated JSON text, length: {}", text.len());
 
                                                 events.push(Ok(ChatResponse {
                                                     event: event_type.clone(),
@@ -546,7 +611,7 @@ impl PoeClient {
                                     ChatEventType::File => {
                                         if let Ok(file_data) = serde_json::from_str::<FileData>(&line) {
                                             #[cfg(feature = "trace")]
-                                            debug!("成功解析到累積的文件數據: {}", file_data.name);
+                                            debug!("Successfully parsed accumulated file data: {}", file_data.name);
 
                                             events.push(Ok(ChatResponse {
                                                 event: ChatEventType::File,
@@ -559,9 +624,9 @@ impl PoeClient {
                                     ChatEventType::Json => {
                                         if let Ok(json) = serde_json::from_str::<Value>(&line) {
                                             #[cfg(feature = "trace")]
-                                            debug!("成功解析到累積的 JSON 事件數據");
+                                            debug!("Successfully parsed accumulated JSON event data");
 
-                                            // 檢查是否有 finish_reason: "tool_calls"
+                                            // Check for finish_reason: "tool_calls"
                                             let finish_reason = json
                                                 .get("choices")
                                                 .and_then(|choices| choices.get(0))
@@ -570,11 +635,11 @@ impl PoeClient {
 
                                             if finish_reason == Some("tool_calls") {
                                                 #[cfg(feature = "trace")]
-                                                debug!("檢測到工具調用完成標誌");
+                                                debug!("Detected tool call completion flag");
                                                 tool_calls_complete = true;
                                             }
 
-                                            // 檢查是否包含 tool_calls delta
+                                            // Check for tool_calls delta
                                             let tool_calls_delta = json
                                                 .get("choices")
                                                 .and_then(|choices| choices.get(0))
@@ -583,9 +648,9 @@ impl PoeClient {
 
                                             if let Some(tool_calls_array) = tool_calls_delta {
                                                 #[cfg(feature = "trace")]
-                                                debug!("檢測到工具調用 delta");
+                                                debug!("Detected tool call delta");
 
-                                                // 處理每個工具調用的 delta
+                                                // Process each tool call delta
                                                 if let Some(tool_calls) = tool_calls_array.as_array() {
                                                     for tool_call_delta in tool_calls {
                                                         let index = tool_call_delta
@@ -594,12 +659,12 @@ impl PoeClient {
                                                             .unwrap_or(0)
                                                             as usize;
 
-                                                        // 確保 accumulated_tool_calls 有足夠的元素
+                                                        // Ensure accumulated_tool_calls has enough elements
                                                         while accumulated_tool_calls.len() <= index {
                                                             accumulated_tool_calls.push(PartialToolCall::default());
                                                         }
 
-                                                        // 更新 id 和 type
+                                                        // Update id and type
                                                         if let Some(id) = tool_call_delta
                                                             .get("id")
                                                             .and_then(Value::as_str)
@@ -614,7 +679,7 @@ impl PoeClient {
                                                             accumulated_tool_calls[index].r#type = type_str.to_string();
                                                         }
 
-                                                        // 更新 function 相關欄位
+                                                        // Update function-related fields
                                                         if let Some(function) = tool_call_delta.get("function") {
                                                             if let Some(name) = function
                                                                 .get("name")
@@ -633,7 +698,7 @@ impl PoeClient {
                                                     }
                                                 }
 
-                                                // 如果工具調用完成，則創建並發送 ChatResponse
+                                                // If tool calls are complete, create and send ChatResponse
                                                 if tool_calls_complete && !accumulated_tool_calls.is_empty() {
                                                     let complete_tool_calls = accumulated_tool_calls
                                                         .iter()
@@ -652,20 +717,20 @@ impl PoeClient {
 
                                                     if !complete_tool_calls.is_empty() {
                                                         #[cfg(feature = "trace")]
-                                                        debug!("發送完整的工具調用，數量: {}", complete_tool_calls.len());
+                                                        debug!("Sending complete tool calls, count: {}", complete_tool_calls.len());
 
                                                         events.push(Ok(ChatResponse {
                                                             event: ChatEventType::Json,
                                                             data: Some(ChatResponseData::ToolCalls(complete_tool_calls)),
                                                         }));
 
-                                                        // 重置累積狀態
+                                                        // Reset accumulated state
                                                         accumulated_tool_calls.clear();
                                                         tool_calls_complete = false;
                                                     }
                                                 }
                                             } else {
-                                                // 如果沒有 tool_calls delta，則按一般 JSON 處理
+                                                // If no tool_calls delta, process as general JSON
                                                 events.push(Ok(ChatResponse {
                                                     event: ChatEventType::Json,
                                                     data: Some(ChatResponseData::Text {
@@ -679,7 +744,7 @@ impl PoeClient {
                                         }
                                     }
                                     ChatEventType::Done | ChatEventType::Error => {
-                                        // 這些事件類型不應該有累積的數據
+                                        // These event types should not have accumulated data
                                         is_collecting_data = false;
                                     }
                                 }
@@ -687,7 +752,7 @@ impl PoeClient {
                         }
                     }
 
-                    // 在處理完 chunk 中的所有行之後，檢查是否需要發送最終的 tool_calls 事件
+                    // After processing all lines in the chunk, check if a final tool_calls event needs to be sent
                     if tool_calls_complete && !accumulated_tool_calls.is_empty() {
                         let complete_tool_calls = accumulated_tool_calls
                             .iter()
@@ -704,14 +769,14 @@ impl PoeClient {
 
                         if !complete_tool_calls.is_empty() {
                             #[cfg(feature = "trace")]
-                            debug!("發送最終的完整工具調用，數量: {}", complete_tool_calls.len());
+                            debug!("Sending final complete tool calls, count: {}", complete_tool_calls.len());
 
                             events.push(Ok(ChatResponse {
                                 event: ChatEventType::Json,
                                 data: Some(ChatResponseData::ToolCalls(complete_tool_calls)),
                             }));
 
-                            // 重置狀態
+                            // Reset state
                             accumulated_tool_calls.clear();
                             tool_calls_complete = false;
                         }
@@ -722,10 +787,22 @@ impl PoeClient {
             })
             .flat_map(|result| {
                 futures_util::stream::iter(match result {
-                    Ok(events) => events,
+                    Ok(events) => {
+                        // Log each yielded ChatResponse
+                        #[cfg(feature = "trace")]
+                        for event in &events {
+                            if let Ok(response) = event {
+                                debug!("yielding_response event_type={:?}, has_data={}", 
+                                    response.event,
+                                    response.data.is_some()
+                                );
+                            }
+                        }
+                        events
+                    }
                     Err(e) => {
                         #[cfg(feature = "trace")]
-                        warn!("串流處理錯誤: {}", e);
+                        warn!("Stream processing error: {}", e);
                         vec![Err(e)]
                     }
                 })
@@ -741,41 +818,41 @@ impl PoeClient {
         tool_results: Vec<ChatToolResult>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("發送工具調用結果，bot_name: {}", self.bot_name);
+        debug!("Sending tool call results, bot_name: {}", self.bot_name);
 
-        // 創建包含工具結果的新請求
+        // Create a new request containing tool results
         let mut request = original_request;
 
-        // 當啟用 xml feature 時，將工具結果以 XML 格式附加到訊息末尾
+        // When xml feature is enabled, append tool results in XML format to the end of the message
         #[cfg(feature = "xml")]
         {
             #[cfg(feature = "trace")]
-            debug!("檢測到 xml feature 啟用，將工具結果轉換為 XML 格式並附加到訊息末尾");
+            debug!("XML feature detected, converting tool results to XML format and appending to the end of the message");
 
-            // 先設置工具調用和結果，以便 XML 轉換方法可以訪問
+            // Set tool calls and results first so XML conversion methods can access them
             request.tool_calls = Some(tool_calls);
             request.tool_results = Some(tool_results);
 
-            // 將工具結果轉換為 XML 格式並附加到訊息末尾
+            // Convert tool results to XML format and append to the end of the message
             request.append_tool_results_as_xml();
 
-            // 清除原始的工具調用和結果，因為已經轉換為 XML 格式
+            // Clear original tool calls and results since they are converted to XML format
             request.tool_calls = None;
             request.tool_results = None;
 
             #[cfg(feature = "trace")]
             debug!(
-                "🔧 工具結果 XML 轉換完成，檢查訊息內容: {}",
+                "🔧 Tool results XML conversion complete, checking message content: {}",
                 request
                     .query
                     .iter()
-                    .map(|msg| format!("角色: {}, 內容長度: {}", msg.role, msg.content.len()))
+                    .map(|msg| format!("Role: {}, Content length: {}", msg.role, msg.content.len()))
                     .collect::<Vec<_>>()
                     .join("; ")
             );
         }
 
-        // 當未啟用 xml feature 時，使用原有的 JSON API 方式
+        // When xml feature is not enabled, use the original JSON API approach
         #[cfg(not(feature = "xml"))]
         {
             request.tool_calls = Some(tool_calls);
@@ -784,15 +861,15 @@ impl PoeClient {
 
         #[cfg(feature = "trace")]
         debug!(
-            "發送工具結果請求結構: {}",
-            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "無法序列化請求".to_string())
+            "Tool results request structure: {}",
+            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "Failed to serialize request".to_string())
         );
 
-        // 發送請求並處理響應（stream_request 會自動處理 XML feature）
+        // Send request and process response (stream_request will automatically handle XML feature)
         self.stream_request(request).await
     }
 
-    /// 上傳本地檔案
+    /// Upload local file
     pub async fn upload_local_file(
         &self,
         file_path: &str,
@@ -800,27 +877,27 @@ impl PoeClient {
     ) -> Result<FileUploadResponse, PoeError> {
         #[cfg(feature = "trace")]
         debug!(
-            "開始上傳本地檔案: {} | MIME 類型: {:?}",
+            "Starting local file upload: {} | MIME type: {:?}",
             file_path, mime_type
         );
-        // 檢查檔案是否存在
+        // Check if file exists
         let path = Path::new(file_path);
         if !path.exists() {
             #[cfg(feature = "trace")]
-            warn!("檔案不存在: {}", file_path);
+            warn!("File not found: {}", file_path);
             return Err(PoeError::FileNotFound(file_path.to_string()));
         }
 
-        // 簡化 MIME 類型處理：如果有提供 mime_type 就使用，否則使用預設值
+        // Simplify MIME type handling: use provided mime_type if available, otherwise use default
         let content_type = mime_type.unwrap_or("application/octet-stream").to_string();
 
         #[cfg(feature = "trace")]
-        debug!("使用 MIME 類型: {}", content_type);
+        debug!("Using MIME type: {}", content_type);
 
-        // 建立 multipart 表單
+        // Create multipart form
         let file = tokio::fs::File::open(path).await.map_err(|e| {
             #[cfg(feature = "trace")]
-            warn!("無法開啟檔案: {}", e);
+            warn!("Failed to open file: {}", e);
             PoeError::FileReadError(e)
         })?;
 
@@ -835,47 +912,47 @@ impl PoeClient {
                 .mime_str(&content_type)
                 .map_err(|e| {
                     #[cfg(feature = "trace")]
-                    warn!("設置 MIME 類型失敗: {}", e);
-                    PoeError::FileUploadFailed(format!("設置 MIME 類型失敗: {}", e))
+                    warn!("Failed to set MIME type: {}", e);
+                    PoeError::FileUploadFailed(format!("Failed to set MIME type: {}", e))
                 })?;
 
         let form = reqwest::multipart::Form::new().part("file", file_part);
 
-        // 發送請求
+        // Send request
         self.send_upload_request(form).await
     }
 
-    /// 上傳遠端檔案 (通過URL)
+    /// Upload remote file (via URL)
     pub async fn upload_remote_file(
         &self,
         download_url: &str,
     ) -> Result<FileUploadResponse, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("開始上傳遠端檔案: {}", download_url);
+        debug!("Starting remote file upload: {}", download_url);
 
-        // 檢查URL格式
+        // Check URL format
         url::Url::parse(download_url)?;
 
-        // 建立 multipart 表單
+        // Create multipart form
         let form = reqwest::multipart::Form::new().text("download_url", download_url.to_string());
 
-        // 發送請求
+        // Send request
         self.send_upload_request(form).await
     }
 
-    /// 批量上傳檔案 (接受混合的本地和遠端檔案)
+    /// Batch upload files (accepts mixed local and remote files)
     pub async fn upload_files_batch(
         &self,
         files: Vec<FileUploadRequest>,
     ) -> Result<Vec<FileUploadResponse>, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("開始批量上傳檔案，數量: {}", files.len());
+        debug!("Starting batch file upload, count: {}", files.len());
 
         if files.is_empty() {
             return Ok(Vec::new());
         }
 
-        // 為每個檔案創建上傳任務
+        // Create upload tasks for each file
         let mut upload_tasks = Vec::with_capacity(files.len());
 
         for file_request in files {
@@ -898,10 +975,10 @@ impl PoeClient {
             upload_tasks.push(task);
         }
 
-        // 等待所有上傳任務完成
+        // Wait for all upload tasks to complete
         let results = join_all(upload_tasks).await;
 
-        // 收集結果
+        // Collect results
         let mut upload_responses = Vec::with_capacity(results.len());
 
         for task_result in results.into_iter() {
@@ -909,36 +986,36 @@ impl PoeClient {
                 Ok(upload_result) => match upload_result {
                     Ok(response) => {
                         #[cfg(feature = "trace")]
-                        debug!("檔案上傳成功: {}", response.attachment_url);
+                        debug!("File upload successful: {}", response.attachment_url);
                         upload_responses.push(response);
                     }
                     Err(e) => {
                         #[cfg(feature = "trace")]
-                        warn!("檔案上傳失敗: {}", e);
+                        warn!("File upload failed: {}", e);
                         return Err(e);
                     }
                 },
                 Err(e) => {
                     #[cfg(feature = "trace")]
-                    warn!("檔案上傳任務失敗: {}", e);
-                    return Err(PoeError::FileUploadFailed(format!("上傳任務失敗: {}", e)));
+                    warn!("File upload task failed: {}", e);
+                    return Err(PoeError::FileUploadFailed(format!("Upload task failed: {}", e)));
                 }
             }
         }
 
         #[cfg(feature = "trace")]
-        debug!("批量上傳全部成功，共 {} 個檔案", upload_responses.len());
+        debug!("Batch upload successful, total {} files", upload_responses.len());
 
         Ok(upload_responses)
     }
 
-    /// 發送檔案上傳請求 (內部方法)
+    /// Send file upload request (internal method)
     async fn send_upload_request(
         &self,
         form: reqwest::multipart::Form,
     ) -> Result<FileUploadResponse, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("發送檔案上傳請求至 {}", self.poe_file_upload_url);
+        debug!("Sending file upload request to {}", self.poe_file_upload_url);
 
         let response = self
             .client
@@ -949,7 +1026,7 @@ impl PoeClient {
             .await
             .map_err(|e| {
                 #[cfg(feature = "trace")]
-                warn!("檔案上傳請求失敗: {}", e);
+                warn!("File upload request failed: {}", e);
                 PoeError::RequestFailed(e)
             })?;
 
@@ -958,50 +1035,50 @@ impl PoeClient {
             let text = response
                 .text()
                 .await
-                .unwrap_or_else(|_| "無法讀取回應內容".to_string());
+                .unwrap_or_else(|_| "Failed to read response content".to_string());
 
             #[cfg(feature = "trace")]
-            warn!("檔案上傳API回應錯誤 - 狀態碼: {}, 內容: {}", status, text);
+            warn!("File upload API response error - Status code: {}, Content: {}", status, text);
 
             return Err(PoeError::FileUploadFailed(format!(
-                "上傳失敗 - 狀態碼: {}, 內容: {}",
+                "Upload failed - Status code: {}, Content: {}",
                 status, text
             )));
         }
 
         #[cfg(feature = "trace")]
-        debug!("成功接收到檔案上傳回應");
+        debug!("Successfully received file upload response");
 
         let response_text = response.text().await.map_err(|e| {
             #[cfg(feature = "trace")]
-            warn!("讀取檔案上傳回應內容失敗: {}", e);
+            warn!("Failed to read file upload response content: {}", e);
             PoeError::RequestFailed(e)
         })?;
 
         #[cfg(feature = "trace")]
-        debug!("檔案上傳回應內容: {}", response_text);
+        debug!("File upload response content: {}", response_text);
 
         let upload_response: FileUploadResponse =
             serde_json::from_str(&response_text).map_err(|e| {
                 #[cfg(feature = "trace")]
-                warn!("解析檔案上傳回應失敗: {}", e);
+                warn!("Failed to parse file upload response: {}", e);
                 PoeError::JsonParseFailed(e)
             })?;
 
         #[cfg(feature = "trace")]
-        debug!("檔案上傳成功，附件URL: {}", upload_response.attachment_url);
+        debug!("File upload successful, attachment URL: {}", upload_response.attachment_url);
 
         Ok(upload_response)
     }
 
-    /// 獲取 v1/models API 的模型列表 (需要 access_key)
+    /// Get model list for v1/models API (requires access_key)
     pub async fn get_v1_model_list(&self) -> Result<ModelResponse, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("開始獲取 v1/models 模型列表");
+        debug!("Starting to get v1/models model list");
 
         let url = format!("{}/v1/models", self.poe_base_url);
         #[cfg(feature = "trace")]
-        debug!("發送 v1/models 請求至 URL: {}", url);
+        debug!("Sending v1/models request to URL: {}", url);
 
         let response = self
             .client
@@ -1012,7 +1089,7 @@ impl PoeClient {
             .await
             .map_err(|e| {
                 #[cfg(feature = "trace")]
-                warn!("發送 v1/models 請求失敗: {}", e);
+                warn!("Failed to send v1/models request: {}", e);
                 PoeError::RequestFailed(e)
             })?;
 
@@ -1021,35 +1098,35 @@ impl PoeClient {
             let text = response
                 .text()
                 .await
-                .unwrap_or_else(|_| "無法讀取回應內容".to_string());
+                .unwrap_or_else(|_| "Failed to read response content".to_string());
 
             #[cfg(feature = "trace")]
             warn!(
-                "v1/models API 回應錯誤 - 狀態碼: {}, 內容: {}",
+                "v1/models API response error - Status code: {}, Content: {}",
                 status, text
             );
 
             return Err(PoeError::BotError(format!(
-                "v1/models API 回應錯誤 - 狀態碼: {}, 內容: {}",
+                "v1/models API response error - Status code: {}, Content: {}",
                 status, text
             )));
         }
 
         #[cfg(feature = "trace")]
-        debug!("成功接收到 v1/models 回應");
+        debug!("Successfully received v1/models response");
 
         let response_text = response.text().await.map_err(|e| {
             #[cfg(feature = "trace")]
-            warn!("讀取 v1/models 回應內容失敗: {}", e);
+            warn!("Failed to read v1/models response content: {}", e);
             PoeError::RequestFailed(e)
         })?;
 
         #[cfg(feature = "trace")]
-        debug!("v1/models 回應內容: {}", response_text);
+        debug!("v1/models response content: {}", response_text);
 
         let json_data: Value = serde_json::from_str(&response_text).map_err(|e| {
             #[cfg(feature = "trace")]
-            warn!("解析 v1/models 回應失敗: {}", e);
+            warn!("Failed to parse v1/models response: {}", e);
             PoeError::JsonParseFailed(e)
         })?;
 
@@ -1057,7 +1134,7 @@ impl PoeClient {
 
         if let Some(data_array) = json_data.get("data").and_then(Value::as_array) {
             #[cfg(feature = "trace")]
-            debug!("找到 {} 個模型", data_array.len());
+            debug!("Found {} models", data_array.len());
 
             for model_data in data_array {
                 if let (Some(id), Some(object), Some(created), Some(owned_by)) = (
@@ -1076,28 +1153,28 @@ impl PoeClient {
             }
         } else {
             #[cfg(feature = "trace")]
-            warn!("無法從 v1/models 回應中取得模型列表");
+            warn!("Could not get model list from v1/models response");
             return Err(PoeError::BotError(
-                "無法從 v1/models 回應中取得模型列表".to_string(),
+                "Could not get model list from v1/models response".to_string(),
             ));
         }
 
         if model_list.is_empty() {
             #[cfg(feature = "trace")]
-            warn!("取得的模型列表為空");
-            return Err(PoeError::BotError("取得的模型列表為空".to_string()));
+            warn!("Retrieved model list is empty");
+            return Err(PoeError::BotError("Retrieved model list is empty".to_string()));
         }
 
         #[cfg(feature = "trace")]
-        debug!("成功解析 {} 個模型", model_list.len());
+        debug!("Successfully parsed {} models", model_list.len());
 
         Ok(ModelResponse { data: model_list })
     }
 
-    /// 從文本中移除 XML 工具調用部分
+    /// Remove XML tool call parts from text
     #[cfg(feature = "xml")]
     pub fn remove_xml_tool_calls(text: &str) -> String {
-        // 創建一個臨時的 ChatMessage 來檢測工具調用
+        // Create a temporary ChatMessage to detect tool calls
         let message = ChatMessage {
             role: "assistant".to_string(),
             content: text.to_string(),
@@ -1105,12 +1182,12 @@ impl PoeClient {
             content_type: "text/plain".to_string(),
         };
 
-        // 如果沒有檢測到工具調用，直接返回原文本
+        // If no tool calls are detected, return the original text directly
         if !message.contains_xml_tool_calls() {
             return text.to_string();
         }
 
-        // 提取工具調用以了解需要移除哪些部分
+        // Extract tool calls to understand which parts need to be removed
         let tool_calls = message.extract_xml_tool_calls();
         if tool_calls.is_empty() {
             return text.to_string();
@@ -1118,7 +1195,7 @@ impl PoeClient {
 
         let mut result = text.to_string();
 
-        // 移除 <tool_call>...</tool_call> 標籤
+        // Remove <tool_call>...</tool_call> tags
         while let Some(start) = result.find("<tool_call>") {
             if let Some(end) = result[start..].find("</tool_call>") {
                 let end_pos = start + end + "</tool_call>".len();
@@ -1128,7 +1205,7 @@ impl PoeClient {
             }
         }
 
-        // 根據檢測到的工具調用移除對應的工具標籤
+        // Remove corresponding tool tags based on detected tool calls
         for tool_call in &tool_calls {
             let tool_name = &tool_call.function.name;
             let start_pattern = format!("<{}>", tool_name);
@@ -1144,7 +1221,7 @@ impl PoeClient {
             }
         }
 
-        // 移除 <invoke> 標籤（如果存在）
+        // Remove <invoke> tag (if it exists)
         while let Some(start) = result.find("<invoke") {
             if let Some(end) = result[start..].find("</invoke>") {
                 let end_pos = start + end + "</invoke>".len();
@@ -1154,7 +1231,7 @@ impl PoeClient {
             }
         }
 
-        // 清理多餘的空行
+        // Clean up extra empty lines
         result
             .lines()
             .filter(|line| !line.trim().is_empty())
@@ -1165,14 +1242,14 @@ impl PoeClient {
 
 pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse, PoeError> {
     #[cfg(feature = "trace")]
-    debug!("開始獲取模型列表，語言代碼: {:?}", language_code);
+    debug!("Starting to get model list, language code: {:?}", language_code);
 
     let client = Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .build()
         .map_err(|e| {
             #[cfg(feature = "trace")]
-            warn!("建立 HTTP 客戶端失敗: {}", e);
+            warn!("Failed to build HTTP client: {}", e);
             PoeError::BotError(e.to_string())
         })?;
 
@@ -1188,7 +1265,7 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
     });
 
     #[cfg(feature = "trace")]
-    debug!("準備 GraphQL 請求載荷，使用 hash: {}", POE_GQL_MODEL_HASH);
+    debug!("Preparing GraphQL request payload, using hash: {}", POE_GQL_MODEL_HASH);
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
@@ -1211,20 +1288,20 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
     if let Some(code) = language_code {
         let cookie_value = format!("Poe-Language-Code={}; p-b=1", code);
         #[cfg(feature = "trace")]
-        debug!("設置語言 Cookie: {}", cookie_value);
+        debug!("Setting language cookie: {}", cookie_value);
 
         headers.insert(
             COOKIE,
             HeaderValue::from_str(&cookie_value).map_err(|e| {
                 #[cfg(feature = "trace")]
-                warn!("設置 Cookie 失敗: {}", e);
+                warn!("Failed to set cookie: {}", e);
                 PoeError::BotError(e.to_string())
             })?,
         );
     }
 
     #[cfg(feature = "trace")]
-    debug!("發送 GraphQL 請求至 {}", POE_GQL_URL);
+    debug!("Sending GraphQL request to {}", POE_GQL_URL);
 
     let response = client
         .post(POE_GQL_URL)
@@ -1234,7 +1311,7 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
         .await
         .map_err(|e| {
             #[cfg(feature = "trace")]
-            warn!("發送 GraphQL 請求失敗: {}", e);
+            warn!("Failed to send GraphQL request: {}", e);
             PoeError::RequestFailed(e)
         })?;
 
@@ -1243,29 +1320,29 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
         let text = response
             .text()
             .await
-            .unwrap_or_else(|_| "無法讀取回應內容".to_string());
+            .unwrap_or_else(|_| "Failed to read response content".to_string());
 
         #[cfg(feature = "trace")]
-        warn!("GraphQL API 回應錯誤 - 狀態碼: {}, 內容: {}", status, text);
+        warn!("GraphQL API response error - Status code: {}, Content: {}", status, text);
 
         return Err(PoeError::BotError(format!(
-            "API 回應錯誤 - 狀態碼: {}, 內容: {}",
+            "API response error - Status code: {}, Content: {}",
             status, text
         )));
     }
 
     #[cfg(feature = "trace")]
-    debug!("成功接收到 GraphQL 回應");
+    debug!("Successfully received GraphQL response");
 
     let json_value = response.text().await.map_err(|e| {
         #[cfg(feature = "trace")]
-        warn!("讀取 GraphQL 回應內容失敗: {}", e);
+        warn!("Failed to read GraphQL response content: {}", e);
         PoeError::RequestFailed(e)
     })?;
 
     let data: Value = serde_json::from_str(&json_value).map_err(|e| {
         #[cfg(feature = "trace")]
-        warn!("解析 GraphQL 回應 JSON 失敗: {}", e);
+        warn!("Failed to parse GraphQL response JSON: {}", e);
         PoeError::JsonParseFailed(e)
     })?;
 
@@ -1273,12 +1350,12 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
 
     if let Some(edges) = data["data"]["exploreBotsConnection"]["edges"].as_array() {
         #[cfg(feature = "trace")]
-        debug!("找到 {} 個模型節點", edges.len());
+        debug!("Found {} model nodes", edges.len());
 
         for edge in edges {
             if let Some(handle) = edge["node"]["handle"].as_str() {
                 #[cfg(feature = "trace")]
-                debug!("解析模型 ID: {}", handle);
+                debug!("Parsing model ID: {}", handle);
 
                 model_list.push(ModelInfo {
                     id: handle.to_string(),
@@ -1288,23 +1365,23 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
                 });
             } else {
                 #[cfg(feature = "trace")]
-                debug!("模型節點中找不到 handle 欄位");
+                debug!("Model node does not have 'handle' field");
             }
         }
     } else {
         #[cfg(feature = "trace")]
-        warn!("無法從回應中取得模型列表節點");
-        return Err(PoeError::BotError("無法從回應中取得模型列表".to_string()));
+        warn!("Could not get model list nodes from response");
+        return Err(PoeError::BotError("Could not get model list from response".to_string()));
     }
 
     if model_list.is_empty() {
         #[cfg(feature = "trace")]
-        warn!("取得的模型列表為空");
-        return Err(PoeError::BotError("取得的模型列表為空".to_string()));
+        warn!("Retrieved model list is empty");
+        return Err(PoeError::BotError("Retrieved model list is empty".to_string()));
     }
 
     #[cfg(feature = "trace")]
-    debug!("成功解析 {} 個模型", model_list.len());
+    debug!("Successfully parsed {} models", model_list.len());
 
     Ok(ModelResponse { data: model_list })
 }
