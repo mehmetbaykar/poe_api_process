@@ -46,8 +46,15 @@ pub struct Attachment {
 // Tool definition related structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatTool {
+    #[serde(default = "default_chat_tool_type")]
     pub r#type: String,
     pub function: FunctionDefinition,
+    #[serde(flatten, default)]
+    pub extra: HashMap<String, Value>,
+}
+
+fn default_chat_tool_type() -> String {
+    "function".to_string()
 }
 
 // FunctionDefinition structure for ChatTool
@@ -58,14 +65,26 @@ pub struct FunctionDefinition {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<FunctionParameters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returns: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+    #[serde(flatten, default)]
+    pub extra: HashMap<String, Value>,
 }
 
 // FunctionParameters structure for FunctionDefinition
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
 pub struct FunctionParameters {
-    pub r#type: String,
-    pub properties: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required: Vec<String>,
+    #[serde(flatten, default)]
+    pub extra: HashMap<String, Value>,
 }
 
 // Tool call related structure
