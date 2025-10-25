@@ -48,6 +48,7 @@ pub struct Attachment {
 pub struct ChatTool {
     #[serde(default = "default_chat_tool_type")]
     pub r#type: String,
+    #[serde(default)]
     pub function: FunctionDefinition,
     #[serde(flatten, default)]
     pub extra: HashMap<String, Value>,
@@ -70,6 +71,7 @@ impl Default for ChatTool {
 // FunctionDefinition structure for ChatTool
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct FunctionDefinition {
+    #[serde(default)]
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
