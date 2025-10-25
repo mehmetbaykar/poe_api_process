@@ -1,7 +1,7 @@
 use crate::error::PoeError;
-use crate::types::*;
 #[cfg(feature = "trace")]
-use crate::logging::{redact_header, truncate_str_by_bytes, loggable_request_json};
+use crate::logging::{loggable_request_json, redact_header, truncate_str_by_bytes};
+use crate::types::*;
 use futures_util::Stream;
 use futures_util::StreamExt;
 use futures_util::future::join_all;
@@ -94,7 +94,7 @@ impl PoeClient {
         }
 
         let url = format!("{}/bot/{}", self.poe_base_url, self.bot_name);
-        
+
         #[cfg(feature = "trace")]
         debug!("Sending request to URL: {}", url);
 
@@ -103,24 +103,30 @@ impl PoeClient {
         {
             let request_json = serde_json::to_value(&request).unwrap_or(Value::Null);
             let loggable_request = loggable_request_json(&request_json, 64 * 1024); // 64KB max
-            
+
             // Create redacted headers map
             let mut headers_map = std::collections::HashMap::new();
-            headers_map.insert("Authorization", redact_header("Authorization", "<Bearer token>"));
+            headers_map.insert(
+                "Authorization",
+                redact_header("Authorization", "<Bearer token>"),
+            );
             headers_map.insert("Content-Type", "application/json".to_string());
-            
-            debug!("outbound_request method={}, url={}, headers_redacted={:?}, body_pretty={}", 
+
+            debug!(
+                "outbound_request method={}, url={}, headers_redacted={:?}, body_pretty={}",
                 "POST",
                 url.as_str(),
                 headers_map,
-                serde_json::to_string_pretty(&loggable_request).unwrap_or_else(|_| "Failed to serialize".to_string())
+                serde_json::to_string_pretty(&loggable_request)
+                    .unwrap_or_else(|_| "Failed to serialize".to_string())
             );
         }
 
         #[cfg(feature = "trace")]
         debug!(
             "🔍 Full request body being sent: {}",
-            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "Failed to serialize".to_string())
+            serde_json::to_string_pretty(&request)
+                .unwrap_or_else(|_| "Failed to serialize".to_string())
         );
 
         let response = self
@@ -135,7 +141,10 @@ impl PoeClient {
             let status = response.status();
             #[cfg(feature = "trace")]
             warn!("API request failed, status code: {}", status);
-            return Err(PoeError::BotError(format!("API response status code: {}", status)));
+            return Err(PoeError::BotError(format!(
+                "API response status code: {}",
+                status
+            )));
         }
 
         #[cfg(feature = "trace")]
@@ -827,7 +836,9 @@ impl PoeClient {
         #[cfg(feature = "xml")]
         {
             #[cfg(feature = "trace")]
-            debug!("XML feature detected, converting tool results to XML format and appending to the end of the message");
+            debug!(
+                "XML feature detected, converting tool results to XML format and appending to the end of the message"
+            );
 
             // Set tool calls and results first so XML conversion methods can access them
             request.tool_calls = Some(tool_calls);
@@ -862,7 +873,8 @@ impl PoeClient {
         #[cfg(feature = "trace")]
         debug!(
             "Tool results request structure: {}",
-            serde_json::to_string_pretty(&request).unwrap_or_else(|_| "Failed to serialize request".to_string())
+            serde_json::to_string_pretty(&request)
+                .unwrap_or_else(|_| "Failed to serialize request".to_string())
         );
 
         // Send request and process response (stream_request will automatically handle XML feature)
@@ -998,13 +1010,19 @@ impl PoeClient {
                 Err(e) => {
                     #[cfg(feature = "trace")]
                     warn!("File upload task failed: {}", e);
-                    return Err(PoeError::FileUploadFailed(format!("Upload task failed: {}", e)));
+                    return Err(PoeError::FileUploadFailed(format!(
+                        "Upload task failed: {}",
+                        e
+                    )));
                 }
             }
         }
 
         #[cfg(feature = "trace")]
-        debug!("Batch upload successful, total {} files", upload_responses.len());
+        debug!(
+            "Batch upload successful, total {} files",
+            upload_responses.len()
+        );
 
         Ok(upload_responses)
     }
@@ -1015,7 +1033,10 @@ impl PoeClient {
         form: reqwest::multipart::Form,
     ) -> Result<FileUploadResponse, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("Sending file upload request to {}", self.poe_file_upload_url);
+        debug!(
+            "Sending file upload request to {}",
+            self.poe_file_upload_url
+        );
 
         let response = self
             .client
@@ -1038,7 +1059,10 @@ impl PoeClient {
                 .unwrap_or_else(|_| "Failed to read response content".to_string());
 
             #[cfg(feature = "trace")]
-            warn!("File upload API response error - Status code: {}, Content: {}", status, text);
+            warn!(
+                "File upload API response error - Status code: {}, Content: {}",
+                status, text
+            );
 
             return Err(PoeError::FileUploadFailed(format!(
                 "Upload failed - Status code: {}, Content: {}",
@@ -1066,7 +1090,10 @@ impl PoeClient {
             })?;
 
         #[cfg(feature = "trace")]
-        debug!("File upload successful, attachment URL: {}", upload_response.attachment_url);
+        debug!(
+            "File upload successful, attachment URL: {}",
+            upload_response.attachment_url
+        );
 
         Ok(upload_response)
     }
@@ -1162,7 +1189,9 @@ impl PoeClient {
         if model_list.is_empty() {
             #[cfg(feature = "trace")]
             warn!("Retrieved model list is empty");
-            return Err(PoeError::BotError("Retrieved model list is empty".to_string()));
+            return Err(PoeError::BotError(
+                "Retrieved model list is empty".to_string(),
+            ));
         }
 
         #[cfg(feature = "trace")]
@@ -1242,7 +1271,10 @@ impl PoeClient {
 
 pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse, PoeError> {
     #[cfg(feature = "trace")]
-    debug!("Starting to get model list, language code: {:?}", language_code);
+    debug!(
+        "Starting to get model list, language code: {:?}",
+        language_code
+    );
 
     let client = Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -1265,7 +1297,10 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
     });
 
     #[cfg(feature = "trace")]
-    debug!("Preparing GraphQL request payload, using hash: {}", POE_GQL_MODEL_HASH);
+    debug!(
+        "Preparing GraphQL request payload, using hash: {}",
+        POE_GQL_MODEL_HASH
+    );
 
     let mut headers = HeaderMap::new();
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
@@ -1323,7 +1358,10 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
             .unwrap_or_else(|_| "Failed to read response content".to_string());
 
         #[cfg(feature = "trace")]
-        warn!("GraphQL API response error - Status code: {}, Content: {}", status, text);
+        warn!(
+            "GraphQL API response error - Status code: {}, Content: {}",
+            status, text
+        );
 
         return Err(PoeError::BotError(format!(
             "API response error - Status code: {}, Content: {}",
@@ -1371,13 +1409,17 @@ pub async fn get_model_list(language_code: Option<&str>) -> Result<ModelResponse
     } else {
         #[cfg(feature = "trace")]
         warn!("Could not get model list nodes from response");
-        return Err(PoeError::BotError("Could not get model list from response".to_string()));
+        return Err(PoeError::BotError(
+            "Could not get model list from response".to_string(),
+        ));
     }
 
     if model_list.is_empty() {
         #[cfg(feature = "trace")]
         warn!("Retrieved model list is empty");
-        return Err(PoeError::BotError("Retrieved model list is empty".to_string()));
+        return Err(PoeError::BotError(
+            "Retrieved model list is empty".to_string(),
+        ));
     }
 
     #[cfg(feature = "trace")]

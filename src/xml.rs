@@ -321,7 +321,10 @@ impl XmlToolCallParser {
         #[cfg(feature = "trace")]
         {
             use tracing::debug;
-            debug!("Starting XML tool call parsing, text length: {}", text.len());
+            debug!(
+                "Starting XML tool call parsing, text length: {}",
+                text.len()
+            );
             debug!("Text preview: {}", text);
         }
 
@@ -475,8 +478,14 @@ impl XmlToolCallParser {
         #[cfg(feature = "trace")]
         {
             use tracing::debug;
-            debug!("Attempting to parse single tool call, content length: {}", xml_content.len());
-            debug!("XML content preview: {}", safe_string_truncate(xml_content, 200));
+            debug!(
+                "Attempting to parse single tool call, content length: {}",
+                xml_content.len()
+            );
+            debug!(
+                "XML content preview: {}",
+                safe_string_truncate(xml_content, 200)
+            );
         }
 
         // First, try to parse <invoke name="tool_name"> format

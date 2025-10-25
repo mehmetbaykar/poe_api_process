@@ -107,7 +107,10 @@ async fn test_get_model_list() {
     let result = get_model_list(Some("zh-Hant")).await;
 
     match &result {
-        Ok(models) => debug!("Successfully retrieved model list, {} models", models.data.len()),
+        Ok(models) => debug!(
+            "Successfully retrieved model list, {} models",
+            models.data.len()
+        ),
         Err(e) => warn!("Failed to get model list: {}", e),
     }
 
@@ -215,7 +218,10 @@ async fn test_stream_content_verification() {
             }
         }
 
-        assert!(received_text_event, "Should receive at least one Event::Text event");
+        assert!(
+            received_text_event,
+            "Should receive at least one Event::Text event"
+        );
         debug!("Stream content verification test complete");
     }
 }
@@ -302,7 +308,10 @@ async fn test_stream_tool_content_verification() {
                                 event_response.data
                             {
                                 received_tool_call = true;
-                                debug!("Received ToolCalls event, number of tool calls: {}", tool_calls.len());
+                                debug!(
+                                    "Received ToolCalls event, number of tool calls: {}",
+                                    tool_calls.len()
+                                );
 
                                 // Verify tool call content
                                 for tool_call in tool_calls {
@@ -310,18 +319,26 @@ async fn test_stream_tool_content_verification() {
                                         tool_call.r#type, "function",
                                         "Tool call type should be function"
                                     );
-                                    assert!(!tool_call.id.is_empty(), "Tool call ID should not be empty");
+                                    assert!(
+                                        !tool_call.id.is_empty(),
+                                        "Tool call ID should not be empty"
+                                    );
                                     assert_eq!(
                                         tool_call.function.name, "get_weather",
                                         "Tool call function name should be get_weather"
                                     );
-                                    debug!("Tool call parameters: {}", tool_call.function.arguments);
+                                    debug!(
+                                        "Tool call parameters: {}",
+                                        tool_call.function.arguments
+                                    );
                                 }
 
                                 // Since we have confirmed tool calls, we can choose to exit the loop
                                 break;
                             } else {
-                                debug!("Received Json event, but no tool_calls, possibly incremental update");
+                                debug!(
+                                    "Received Json event, but no tool_calls, possibly incremental update"
+                                );
                             }
                         }
                         ChatEventType::Error => {
@@ -426,7 +443,10 @@ async fn test_tool_call_parse_error() {
         serde_json::from_value(tool_calls_value.clone());
 
     // Verify parsing result should be an error
-    assert!(parse_result.is_err(), "Parsing invalid tool calls should fail");
+    assert!(
+        parse_result.is_err(),
+        "Parsing invalid tool calls should fail"
+    );
 
     // Verify error type
     let error = parse_result.unwrap_err();
@@ -460,28 +480,41 @@ async fn test_file_upload() {
     debug!("Creating temporary test file: {}", file_path_str);
     {
         let mut file = File::create(&file_path).expect("Could not create temporary file");
-        writeln!(file, "This is a test file content for upload").expect("Could not write to temporary file");
+        writeln!(file, "This is a test file content for upload")
+            .expect("Could not write to temporary file");
     }
     // Test local file upload
     debug!("Starting test for local file upload");
     let upload_result = client.upload_local_file(&file_path_str, None).await;
     match &upload_result {
         Ok(response) => {
-            debug!("File upload successful, attachment URL: {}", response.attachment_url);
+            debug!(
+                "File upload successful, attachment URL: {}",
+                response.attachment_url
+            );
             debug!("File MIME type: {}", response.mime_type.clone().unwrap());
             debug!("File size: {} bytes", response.size.unwrap());
         }
         Err(e) => warn!("File upload failed: {}", e),
     }
-    assert!(upload_result.is_ok(), "Local file upload should be successful");
+    assert!(
+        upload_result.is_ok(),
+        "Local file upload should be successful"
+    );
     if let Ok(response) = upload_result {
-        assert!(!response.attachment_url.is_empty(), "Attachment URL should not be empty");
+        assert!(
+            !response.attachment_url.is_empty(),
+            "Attachment URL should not be empty"
+        );
         assert_eq!(
             response.mime_type.unwrap(),
             "text/plain",
             "MIME type should be text/plain"
         );
-        assert!(response.size.unwrap() > 0, "File size should be greater than 0");
+        assert!(
+            response.size.unwrap() > 0,
+            "File size should be greater than 0"
+        );
     }
     // Test batch upload
     debug!("Starting test for batch file upload");
@@ -517,7 +550,8 @@ async fn test_file_upload() {
         r#type: "query".to_string(),
         query: vec![ChatMessage {
             role: "user".to_string(),
-            content: "This is a message with an attachment, please analyze the file content".to_string(),
+            content: "This is a message with an attachment, please analyze the file content"
+                .to_string(),
             content_type: "text/markdown".to_string(),
             attachments: Some(vec![Attachment {
                 url: file_upload_response.attachment_url,
@@ -540,7 +574,10 @@ async fn test_file_upload() {
         Ok(_) => debug!("Message request with attachment successful"),
         Err(e) => warn!("Message request with attachment failed: {}", e),
     }
-    assert!(result.is_ok(), "Message request with attachment should be successful");
+    assert!(
+        result.is_ok(),
+        "Message request with attachment should be successful"
+    );
     if let Ok(mut stream) = result {
         let mut received_response = false;
         debug!("Starting to process message response stream with attachment");
@@ -552,7 +589,9 @@ async fn test_file_upload() {
                     // Check if the response mentioned attachment or file
                     if let Some(ChatResponseData::Text { text }) = &event.data {
                         if text.contains("file") || text.contains("content") {
-                            debug!("Response mentioned file or content, confirming attachment handled");
+                            debug!(
+                                "Response mentioned file or content, confirming attachment handled"
+                            );
                         }
                     }
                 }
@@ -562,7 +601,10 @@ async fn test_file_upload() {
                 }
             }
         }
-        assert!(received_response, "Should receive at least one message response with attachment");
+        assert!(
+            received_response,
+            "Should receive at least one message response with attachment"
+        );
     }
     // Test invalid file path
     debug!("Starting test for invalid file path");
@@ -572,10 +614,15 @@ async fn test_file_upload() {
         Ok(_) => warn!("Uploading non-existent file succeeded, which is unexpected"),
         Err(e) => debug!("As expected, uploading non-existent file failed: {}", e),
     }
-    assert!(invalid_result.is_err(), "Uploading non-existent file should fail");
+    assert!(
+        invalid_result.is_err(),
+        "Uploading non-existent file should fail"
+    );
     // Clean up temporary file
     debug!("Test complete, cleaning up temporary file");
-    temp_dir.close().expect("Could not clean up temporary directory");
+    temp_dir
+        .close()
+        .expect("Could not clean up temporary directory");
 }
 
 #[test_log::test(tokio::test)]
@@ -597,7 +644,10 @@ async fn test_remote_file_upload() {
     let upload_result = client.upload_remote_file(test_url).await;
     match &upload_result {
         Ok(response) => {
-            debug!("Remote file upload successful, attachment URL: {}", response.attachment_url);
+            debug!(
+                "Remote file upload successful, attachment URL: {}",
+                response.attachment_url
+            );
             debug!("File MIME type: {}", response.mime_type.clone().unwrap());
             debug!("File size: {} bytes", response.size.unwrap());
         }
@@ -607,9 +657,18 @@ async fn test_remote_file_upload() {
     // Note: Since remote services may be unreliable, we do not force assertions that it must succeed
     // If it succeeds, we check if the response format is correct
     if let Ok(response) = upload_result {
-        assert!(!response.attachment_url.is_empty(), "Attachment URL should not be empty");
-        assert!(!response.mime_type.unwrap().is_empty(), "MIME type should not be empty");
-        assert!(response.size.unwrap() > 0, "File size should be greater than 0");
+        assert!(
+            !response.attachment_url.is_empty(),
+            "Attachment URL should not be empty"
+        );
+        assert!(
+            !response.mime_type.unwrap().is_empty(),
+            "MIME type should not be empty"
+        );
+        assert!(
+            response.size.unwrap() > 0,
+            "File size should be greater than 0"
+        );
         debug!("Remote file upload test complete");
     } else {
         debug!("Remote file upload failed, this may be a network issue or service limitation");
@@ -650,7 +709,10 @@ async fn test_get_v1_model_list() {
 
     match result {
         Ok(models) => {
-            assert!(!models.data.is_empty(), "v1/models model list should not be empty");
+            assert!(
+                !models.data.is_empty(),
+                "v1/models model list should not be empty"
+            );
             debug!("Successfully retrieved {} v1 models", models.data.len());
 
             // Verify basic info of the first model
@@ -689,7 +751,10 @@ async fn test_xml_tool_call_detection() {
         content_type: "text/plain".to_string(),
     };
 
-    assert!(message.contains_xml_tool_calls(), "Should detect XML tool call");
+    assert!(
+        message.contains_xml_tool_calls(),
+        "Should detect XML tool call"
+    );
     debug!("XML tool call detection test complete");
 }
 
@@ -715,9 +780,12 @@ async fn test_xml_tool_call_extraction() {
     );
 
     // Parse parameters
-    let args: serde_json::Value =
-        serde_json::from_str(&tool_calls[0].function.arguments).expect("Parameters should be valid JSON");
-    assert_eq!(args["location"], "Taipei", "location parameter should be Taipei");
+    let args: serde_json::Value = serde_json::from_str(&tool_calls[0].function.arguments)
+        .expect("Parameters should be valid JSON");
+    assert_eq!(
+        args["location"], "Taipei",
+        "location parameter should be Taipei"
+    );
     assert_eq!(args["unit"], "celsius", "unit parameter should be celsius");
 
     debug!("XML tool call extraction test complete");
@@ -788,15 +856,24 @@ async fn test_xml_tool_call_with_complex_parameters() {
         "Tool name should be send_email"
     );
 
-    let args: serde_json::Value =
-        serde_json::from_str(&tool_calls[0].function.arguments).expect("Parameters should be valid JSON");
-    assert_eq!(args["to"], "user@example.com", "to parameter should be correct");
-    assert_eq!(args["subject"], "Test Email", "subject parameter should be correct");
+    let args: serde_json::Value = serde_json::from_str(&tool_calls[0].function.arguments)
+        .expect("Parameters should be valid JSON");
+    assert_eq!(
+        args["to"], "user@example.com",
+        "to parameter should be correct"
+    );
+    assert_eq!(
+        args["subject"], "Test Email",
+        "subject parameter should be correct"
+    );
     assert_eq!(
         args["body"], "This is a test email, including special characters: <test>",
         "body parameter should be correctly decoded XML entities"
     );
-    assert_eq!(args["priority"], "high", "priority parameter should be correct");
+    assert_eq!(
+        args["priority"], "high",
+        "priority parameter should be correct"
+    );
 
     debug!("Complex parameter XML tool call test complete");
 }
@@ -847,10 +924,14 @@ async fn test_xml_tool_call_with_empty_parameters() {
         "Tool name should be get_time"
     );
 
-    let args: serde_json::Value =
-        serde_json::from_str(&tool_calls[0].function.arguments).expect("Parameters should be valid JSON");
+    let args: serde_json::Value = serde_json::from_str(&tool_calls[0].function.arguments)
+        .expect("Parameters should be valid JSON");
     assert!(args.is_object(), "Parameters should be an empty object");
-    assert_eq!(args.as_object().unwrap().len(), 0, "Parameters object should be empty");
+    assert_eq!(
+        args.as_object().unwrap().len(),
+        0,
+        "Parameters object should be empty"
+    );
 
     debug!("XML tool call with no parameters test complete");
 }
@@ -872,7 +953,10 @@ async fn test_xml_tool_call_parsing_error_handling() {
     // Even if XML format is incorrect, the function should be able to handle it without crashing
     let tool_calls = message_with_invalid_xml.extract_xml_tool_calls();
     // Due to incorrect XML format, it might not be parsed correctly, but should not crash
-    debug!("Malformed XML parsing result: {} tool calls", tool_calls.len());
+    debug!(
+        "Malformed XML parsing result: {} tool calls",
+        tool_calls.len()
+    );
 
     debug!("XML tool call parsing error handling test complete");
 }
@@ -894,8 +978,8 @@ async fn test_xml_entity_decoding() {
 
     assert_eq!(tool_calls.len(), 1, "Should extract one tool call");
 
-    let args: serde_json::Value =
-        serde_json::from_str(&tool_calls[0].function.arguments).expect("Parameters should be valid JSON");
+    let args: serde_json::Value = serde_json::from_str(&tool_calls[0].function.arguments)
+        .expect("Parameters should be valid JSON");
     assert_eq!(
         args["text"], "<hello> & \"world\" 'test'",
         "XML entities should be correctly decoded"
@@ -1029,19 +1113,25 @@ async fn test_dynamic_xml_tool_call_extraction() {
 
     // First test the general method
     let general_tool_calls = message.extract_xml_tool_calls();
-    debug!("Number of tool calls extracted by general method: {}", general_tool_calls.len());
+    debug!(
+        "Number of tool calls extracted by general method: {}",
+        general_tool_calls.len()
+    );
 
     // Then test the method based on tool definitions
     let tool_calls = message.extract_xml_tool_calls_with_tools(&custom_tools);
-    debug!("Number of tool calls extracted by tool definition method: {}", tool_calls.len());
+    debug!(
+        "Number of tool calls extracted by tool definition method: {}",
+        tool_calls.len()
+    );
 
     if !tool_calls.is_empty() {
         debug!("Tool call content: {:?}", tool_calls[0]);
         debug!("Parameter string: {}", tool_calls[0].function.arguments);
 
         // Parse parameters
-        let args: serde_json::Value =
-            serde_json::from_str(&tool_calls[0].function.arguments).expect("Parameters should be valid JSON");
+        let args: serde_json::Value = serde_json::from_str(&tool_calls[0].function.arguments)
+            .expect("Parameters should be valid JSON");
         debug!("Parsed parameters: {:?}", args);
 
         assert_eq!(
@@ -1104,7 +1194,8 @@ async fn test_potential_tool_name_detection() {
     // Test message containing HTML tags (should not be detected as tool call)
     let message_with_html = ChatMessage {
         role: "assistant".to_string(),
-        content: "This is a response containing HTML:\n\n<div>\n<p>This is a paragraph</p>\n</div>".to_string(),
+        content: "This is a response containing HTML:\n\n<div>\n<p>This is a paragraph</p>\n</div>"
+            .to_string(),
         attachments: None,
         content_type: "text/plain".to_string(),
     };
@@ -1138,7 +1229,8 @@ async fn test_potential_tool_name_detection() {
     // Test message containing camel-case tool name
     let message_with_camel_case = ChatMessage {
         role: "assistant".to_string(),
-        content: "Perform an operation.\n\n<getUserData>\n<userId>123</userId>\n</getUserData>".to_string(),
+        content: "Perform an operation.\n\n<getUserData>\n<userId>123</userId>\n</getUserData>"
+            .to_string(),
         attachments: None,
         content_type: "text/plain".to_string(),
     };
@@ -1204,7 +1296,10 @@ Processing..."#
     let tool_calls = message.extract_xml_tool_calls_with_tools(&tools);
 
     // Should be able to parse both tool call formats
-    assert!(tool_calls.len() >= 1, "Should extract at least one tool call");
+    assert!(
+        tool_calls.len() >= 1,
+        "Should extract at least one tool call"
+    );
 
     // Check if standard tool is included
     let has_standard_tool = tool_calls
@@ -1242,7 +1337,10 @@ Please wait a moment, I am querying Taipei's weather for you."#;
         !cleaned_text.contains("<tool_call>"),
         "Should remove tool_call tag"
     );
-    assert!(!cleaned_text.contains("<invoke"), "Should remove invoke tag");
+    assert!(
+        !cleaned_text.contains("<invoke"),
+        "Should remove invoke tag"
+    );
     assert!(
         !cleaned_text.contains("<parameter"),
         "Should remove parameter tag"

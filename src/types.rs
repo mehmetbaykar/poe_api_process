@@ -205,3 +205,77 @@ pub struct FileUploadResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn function_parameters_accept_optional_fields() {
+        let value = json!({
+            "type": "object",
+            "properties": {
+                "city": { "type": "string" }
+            },
+            "additionalProperties": false
+        });
+
+        let params: FunctionParameters = serde_json::from_value(value).unwrap();
+        assert_eq!(params.r#type.as_deref(), Some("object"));
+        assert!(params.required.is_empty());
+        assert!(params.properties.is_some());
+        assert_eq!(
+            params
+                .extra
+                .get("additionalProperties")
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn chat_tool_defaults_type_and_preserves_extras() {
+        let raw = json!({
+            "function": {
+                "name": "lookup",
+                "strict": true,
+                "returns": { "type": "string" },
+                "parameters": {
+                    "properties": {
+                        "query": { "type": "string" }
+                    },
+                    "dependentRequired": {
+                        "query": ["format"]
+                    }
+                },
+                "x-extra-field": "value"
+            },
+            "metadata": "tool-meta"
+        });
+
+        let tool: ChatTool = serde_json::from_value(raw).unwrap();
+        assert_eq!(tool.r#type, "function");
+        assert_eq!(
+            tool.extra.get("metadata").and_then(|v| v.as_str()),
+            Some("tool-meta")
+        );
+
+        let function = tool.function;
+        assert_eq!(function.name, "lookup");
+        assert_eq!(function.strict, Some(true));
+        assert!(function.returns.is_some());
+        assert_eq!(
+            function.extra.get("x-extra-field").and_then(|v| v.as_str()),
+            Some("value")
+        );
+
+        let parameters = function.parameters.unwrap();
+        assert!(parameters.required.is_empty());
+        assert!(parameters.properties.is_some());
+        assert!(
+            parameters.extra.get("dependentRequired").is_some(),
+            "dependentRequired should be preserved in extra map"
+        );
+    }
+}

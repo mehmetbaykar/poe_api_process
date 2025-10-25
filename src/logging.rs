@@ -5,12 +5,12 @@ pub(crate) fn truncate_str_by_bytes(s: &str, max: usize) -> (String, bool) {
     if s.len() <= max {
         return (s.to_string(), false);
     }
-    
+
     let mut end = max;
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
-    
+
     let truncated = format!("{}… [truncated {} bytes]", &s[..end], s.len() - end);
     (truncated, true)
 }
@@ -24,13 +24,17 @@ pub(crate) fn redact_header(name: &str, value: &str) -> String {
 }
 
 /// Create a JSON representation of ChatRequest with message content truncated to 64KB
-pub(crate) fn loggable_request_json(request: &serde_json::Value, max_message_bytes: usize) -> Value {
+pub(crate) fn loggable_request_json(
+    request: &serde_json::Value,
+    max_message_bytes: usize,
+) -> Value {
     let mut loggable = request.clone();
-    
+
     if let Some(query_array) = loggable.get_mut("query").and_then(Value::as_array_mut) {
         for item in query_array {
             if let Some(content_str) = item.get("content").and_then(Value::as_str) {
-                let (truncated, was_truncated) = truncate_str_by_bytes(content_str, max_message_bytes);
+                let (truncated, was_truncated) =
+                    truncate_str_by_bytes(content_str, max_message_bytes);
                 if was_truncated {
                     if let Some(content_slot) = item.get_mut("content") {
                         *content_slot = Value::String(truncated);
@@ -39,7 +43,7 @@ pub(crate) fn loggable_request_json(request: &serde_json::Value, max_message_byt
             }
         }
     }
-    
+
     loggable
 }
 
@@ -50,14 +54,16 @@ pub(crate) fn truncate_text_fields(value: &Value, max_bytes: usize) -> Value {
             let (truncated, was_truncated) = truncate_str_by_bytes(s, max_bytes);
             Value::String(if was_truncated { truncated } else { s.clone() })
         }
-        Value::Array(arr) => {
-            Value::Array(arr.iter().map(|v| truncate_text_fields(v, max_bytes)).collect())
-        }
-        Value::Object(obj) => {
-            Value::Object(obj.iter().map(|(k, v)| {
-                (k.clone(), truncate_text_fields(v, max_bytes))
-            }).collect())
-        }
+        Value::Array(arr) => Value::Array(
+            arr.iter()
+                .map(|v| truncate_text_fields(v, max_bytes))
+                .collect(),
+        ),
+        Value::Object(obj) => Value::Object(
+            obj.iter()
+                .map(|(k, v)| (k.clone(), truncate_text_fields(v, max_bytes)))
+                .collect(),
+        ),
         _ => value.clone(),
     }
 }
