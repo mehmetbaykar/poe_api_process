@@ -247,13 +247,12 @@ async fn test_stream_tool_content_verification() {
         conversation_id: String::new(),
         message_id: String::new(),
         tools: Some(vec![ChatTool {
-            r#type: "function".to_string(),
             function: FunctionDefinition {
                 name: "get_weather".to_string(),
                 description: Some("Get weather information for a location".to_string()),
                 parameters: Some(FunctionParameters {
-                    r#type: "object".to_string(),
-                    properties: json!({
+                    r#type: Some("object".to_string()),
+                    properties: Some(json!({
                         "location": {
                             "type": "string",
                             "description": "The city and state, e.g. San Francisco, CA"
@@ -263,10 +262,13 @@ async fn test_stream_tool_content_verification() {
                             "enum": ["celsius", "fahrenheit"],
                             "description": "The unit of temperature"
                         }
-                    }),
+                    })),
                     required: vec!["location".to_string()],
+                    ..Default::default()
                 }),
+                ..Default::default()
             },
+            ..Default::default()
         }]),
         tool_calls: None,
         tool_results: None,
@@ -911,38 +913,42 @@ async fn test_dynamic_xml_tool_call_detection() {
     // Create custom tool definitions
     let custom_tools = vec![
         ChatTool {
-            r#type: "function".to_string(),
             function: FunctionDefinition {
                 name: "custom_weather_api".to_string(),
                 description: Some("Custom weather API".to_string()),
                 parameters: Some(FunctionParameters {
-                    r#type: "object".to_string(),
-                    properties: json!({
+                    r#type: Some("object".to_string()),
+                    properties: Some(json!({
                         "city": {
                             "type": "string",
                             "description": "City name"
                         }
-                    }),
+                    })),
                     required: vec!["city".to_string()],
+                    ..Default::default()
                 }),
+                ..Default::default()
             },
+            ..Default::default()
         },
         ChatTool {
-            r#type: "function".to_string(),
             function: FunctionDefinition {
                 name: "send_notification".to_string(),
                 description: Some("Send notification".to_string()),
                 parameters: Some(FunctionParameters {
-                    r#type: "object".to_string(),
-                    properties: json!({
+                    r#type: Some("object".to_string()),
+                    properties: Some(json!({
                         "message": {
                             "type": "string",
                             "description": "Notification message"
                         }
-                    }),
+                    })),
                     required: vec!["message".to_string()],
+                    ..Default::default()
                 }),
+                ..Default::default()
             },
+            ..Default::default()
         },
     ];
 
@@ -984,13 +990,12 @@ async fn test_dynamic_xml_tool_call_extraction() {
 
     // Create custom tool definitions
     let custom_tools = vec![ChatTool {
-        r#type: "function".to_string(),
         function: FunctionDefinition {
             name: "database_query".to_string(),
             description: Some("Database query".to_string()),
             parameters: Some(FunctionParameters {
-                r#type: "object".to_string(),
-                properties: json!({
+                r#type: Some("object".to_string()),
+                properties: Some(json!({
                     "table": {
                         "type": "string",
                         "description": "Table name"
@@ -999,10 +1004,13 @@ async fn test_dynamic_xml_tool_call_extraction() {
                         "type": "string",
                         "description": "Query conditions"
                     }
-                }),
+                })),
                 required: vec!["table".to_string()],
+                ..Default::default()
             }),
+            ..Default::default()
         },
+        ..Default::default()
     }];
 
     // Test message containing custom tool calls
@@ -1061,21 +1069,23 @@ async fn test_potential_tool_name_detection() {
 
     // Create tool definitions containing fetch_data tool
     let tools_with_fetch_data = vec![ChatTool {
-        r#type: "function".to_string(),
         function: FunctionDefinition {
             name: "fetch_data".to_string(),
             description: Some("Get data".to_string()),
             parameters: Some(FunctionParameters {
-                r#type: "object".to_string(),
-                properties: json!({
+                r#type: Some("object".to_string()),
+                properties: Some(json!({
                     "url": {
                         "type": "string",
                         "description": "API URL"
                     }
-                }),
+                })),
                 required: vec!["url".to_string()],
+                ..Default::default()
             }),
+            ..Default::default()
         },
+        ..Default::default()
     }];
 
     // Test message containing potential tool name
@@ -1106,21 +1116,23 @@ async fn test_potential_tool_name_detection() {
 
     // Create tool definitions containing getUserData tool
     let tools_with_get_user_data = vec![ChatTool {
-        r#type: "function".to_string(),
         function: FunctionDefinition {
             name: "getUserData".to_string(),
             description: Some("Get user data".to_string()),
             parameters: Some(FunctionParameters {
-                r#type: "object".to_string(),
-                properties: json!({
+                r#type: Some("object".to_string()),
+                properties: Some(json!({
                     "userId": {
                         "type": "string",
                         "description": "User ID"
                     }
-                }),
+                })),
                 required: vec!["userId".to_string()],
+                ..Default::default()
             }),
+            ..Default::default()
         },
+        ..Default::default()
     }];
 
     // Test message containing camel-case tool name
@@ -1147,21 +1159,23 @@ async fn test_mixed_tool_call_formats() {
 
     // Create tool definitions with multiple formats
     let tools = vec![ChatTool {
-        r#type: "function".to_string(),
         function: FunctionDefinition {
             name: "standard_tool".to_string(),
             description: Some("Standard tool".to_string()),
             parameters: Some(FunctionParameters {
-                r#type: "object".to_string(),
-                properties: json!({
+                r#type: Some("object".to_string()),
+                properties: Some(json!({
                     "param": {
                         "type": "string",
                         "description": "Parameter"
                     }
-                }),
+                })),
                 required: vec!["param".to_string()],
+                ..Default::default()
             }),
+            ..Default::default()
         },
+        ..Default::default()
     }];
 
     // Test message containing multiple formats

@@ -64,7 +64,11 @@ impl ToXml for ChatTool {
         if let Some(ref parameters) = self.function.parameters {
             xml.push_str("\n<parameters>");
 
-            if let Some(properties) = parameters.properties.as_object() {
+            if let Some(properties) = parameters
+                .properties
+                .as_ref()
+                .and_then(|value| value.as_object())
+            {
                 for (param_name, param_value) in properties {
                     xml.push_str(&format!(
                         "\n<{}_name>{}</{}_name>",
