@@ -409,7 +409,9 @@ mod tests {
 
         let tool: ChatTool = serde_json::from_value(tool_json).unwrap();
         let params = tool.function.parameters.unwrap();
-        assert!(params.required.is_empty(), "Required should default to empty vec");
+        assert!(
+            params.required.is_empty(),
+            "Required should default to empty vec"
+        );
     }
 }
-
