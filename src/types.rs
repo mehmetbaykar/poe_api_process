@@ -280,4 +280,136 @@ mod tests {
             "dependentRequired should be preserved in extra map"
         );
     }
+
+    #[test]
+    fn test_tool_call_serialization() {
+        let tool_call = ChatToolCall {
+            id: "call_abc123".to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "get_weather".to_string(),
+                arguments: r#"{"city": "London"}"#.to_string(),
+            },
+        };
+
+        let serialized = serde_json::to_value(&tool_call).unwrap();
+        assert_eq!(serialized["id"], "call_abc123");
+        assert_eq!(serialized["type"], "function");
+        assert_eq!(serialized["function"]["name"], "get_weather");
+
+        // Test deserialization
+        let deserialized: ChatToolCall = serde_json::from_value(serialized).unwrap();
+        assert_eq!(deserialized.id, "call_abc123");
+        assert_eq!(deserialized.function.name, "get_weather");
+    }
+
+    #[test]
+    fn test_tool_result_structure() {
+        let tool_result = ChatToolResult {
+            role: "tool".to_string(),
+            tool_call_id: "call_abc123".to_string(),
+            name: "get_weather".to_string(),
+            content: r#"{"temperature": 20, "condition": "sunny"}"#.to_string(),
+        };
+
+        let serialized = serde_json::to_value(&tool_result).unwrap();
+        assert_eq!(serialized["role"], "tool");
+        assert_eq!(serialized["tool_call_id"], "call_abc123");
+        assert_eq!(serialized["name"], "get_weather");
+        assert!(serialized["content"].is_string());
+
+        // Test deserialization
+        let deserialized: ChatToolResult = serde_json::from_value(serialized).unwrap();
+        assert_eq!(deserialized.tool_call_id, "call_abc123");
+        assert_eq!(deserialized.name, "get_weather");
+    }
+
+    #[test]
+    fn test_chat_request_with_tool_results() {
+        let chat_request = ChatRequest {
+            version: "1.1".to_string(),
+            r#type: "query".to_string(),
+            query: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "What's the weather?".to_string(),
+                attachments: None,
+                content_type: "text/plain".to_string(),
+            }],
+            user_id: "user123".to_string(),
+            conversation_id: "conv123".to_string(),
+            message_id: "msg123".to_string(),
+            tools: None,
+            tool_calls: None,
+            tool_results: Some(vec![ChatToolResult {
+                role: "tool".to_string(),
+                tool_call_id: "call_abc123".to_string(),
+                name: "get_weather".to_string(),
+                content: r#"{"temperature": 20}"#.to_string(),
+            }]),
+            temperature: None,
+            logit_bias: None,
+            stop_sequences: None,
+        };
+
+        let serialized = serde_json::to_value(&chat_request).unwrap();
+        assert!(serialized["tool_results"].is_array());
+        assert_eq!(serialized["tool_results"][0]["tool_call_id"], "call_abc123");
+
+        // Verify tool_results field is included in serialization
+        let json_str = serde_json::to_string(&chat_request).unwrap();
+        assert!(json_str.contains("tool_results"));
+        assert!(json_str.contains("call_abc123"));
+    }
+
+    #[test]
+    fn test_cursor_style_tool_definition() {
+        // Test tool definition in Cursor's format
+        let cursor_tool = json!({
+            "type": "function",
+            "function": {
+                "name": "execute_command",
+                "description": "Execute a shell command",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The command to execute"
+                        }
+                    },
+                    "required": ["command"]
+                }
+            }
+        });
+
+        let tool: ChatTool = serde_json::from_value(cursor_tool).unwrap();
+        assert_eq!(tool.r#type, "function");
+        assert_eq!(tool.function.name, "execute_command");
+
+        let params = tool.function.parameters.unwrap();
+        assert_eq!(params.required, vec!["command"]);
+        assert!(params.properties.is_some());
+    }
+
+    #[test]
+    fn test_empty_required_array_in_parameters() {
+        // Cursor sometimes sends tools without required field
+        let tool_json = json!({
+            "type": "function",
+            "function": {
+                "name": "optional_tool",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "param1": { "type": "string" }
+                    }
+                }
+            }
+        });
+
+        let tool: ChatTool = serde_json::from_value(tool_json).unwrap();
+        let params = tool.function.parameters.unwrap();
+        assert!(params.required.is_empty(), "Required should default to empty vec");
+    }
 }
+
