@@ -67,6 +67,10 @@ impl PoeClient {
         #[cfg(feature = "trace")]
         debug!("Starting streaming request, bot_name: {}", self.bot_name);
 
+        // Preserve original tool definitions for XML detection before we mutate the request.
+        #[cfg(feature = "xml")]
+        let original_tools_for_detection = request.tools.clone();
+
         // When xml feature is enabled, automatically convert tools to XML format
         #[cfg(feature = "xml")]
         {
@@ -163,7 +167,7 @@ impl PoeClient {
         #[cfg(feature = "xml")]
         let mut xml_detection_active = false;
         #[cfg(feature = "xml")]
-        let available_tools = request.tools.clone().unwrap_or_default();
+        let available_tools = original_tools_for_detection.unwrap_or_default();
 
         let stream = response
             .bytes_stream()
@@ -240,7 +244,7 @@ impl PoeClient {
                                                 {
                                                     let (truncated_text, was_truncated) = truncate_str_by_bytes(text, 64 * 1024);
                                                     let loggable_text = if was_truncated { truncated_text } else { text.to_string() };
-                                                    debug!("incoming_text_event event_type={:?}, text_preview={}, original_length={}", 
+                                                    debug!("incoming_text_event event_type={:?}, text_preview={}, original_length={}",
                                                         event_type,
                                                         loggable_text.as_str(),
                                                         text.len()
@@ -365,15 +369,15 @@ impl PoeClient {
                                         if let Ok(file_data) = serde_json::from_str::<FileData>(data) {
                                             #[cfg(feature = "trace")]
                                             debug!("Parsed file data: {}", file_data.name);
-                                            
+
                                             // Log file event
                                             #[cfg(feature = "trace")]
-                                            debug!("incoming_file_event file_name={}, content_type={}, url_length={}", 
+                                            debug!("incoming_file_event file_name={}, content_type={}, url_length={}",
                                                 file_data.name.as_str(),
                                                 file_data.content_type.as_str(),
                                                 file_data.url.len()
                                             );
-                                            
+
                                             events.push(Ok(ChatResponse {
                                                 event: ChatEventType::File,
                                                 data: Some(ChatResponseData::File(file_data)),
@@ -388,16 +392,16 @@ impl PoeClient {
                                         if let Ok(json) = serde_json::from_str::<Value>(data) {
                                             #[cfg(feature = "trace")]
                                             debug!("Parsed JSON event data");
-                                            
+
                                             // Log JSON event data with truncation
                                             #[cfg(feature = "trace")]
                                             {
                                                 let loggable_json = crate::logging::truncate_text_fields(&json, 64 * 1024);
-                                                debug!("incoming_json_event json_pretty={}", 
+                                                debug!("incoming_json_event json_pretty={}",
                                                     serde_json::to_string_pretty(&loggable_json).unwrap_or_else(|_| "Failed to serialize".to_string())
                                                 );
                                             }
-                                            
+
                                             // Check for finish_reason: "tool_calls", indicating tool calls are complete
                                             let finish_reason = json
                                                 .get("choices")
@@ -487,11 +491,11 @@ impl PoeClient {
                                     ChatEventType::Done => {
                                         #[cfg(feature = "trace")]
                                         debug!("Received done event");
-                                        
+
                                         // Log done event
                                         #[cfg(feature = "trace")]
                                         debug!("incoming_done_event event_type=done");
-                                        
+
                                         // Process any remaining XML buffer content
                                         #[cfg(feature = "xml")]
                                         {
@@ -567,10 +571,10 @@ impl PoeClient {
 
                                             #[cfg(feature = "trace")]
                                             warn!("Received error event: {}, Retryable: {}", text, allow_retry);
-                                            
+
                                             // Log error event
                                             #[cfg(feature = "trace")]
-                                            debug!("incoming_error_event error_text={}, retryable={}", 
+                                            debug!("incoming_error_event error_text={}, retryable={}",
                                                 text,
                                                 allow_retry
                                             );
@@ -801,7 +805,7 @@ impl PoeClient {
                         #[cfg(feature = "trace")]
                         for event in &events {
                             if let Ok(response) = event {
-                                debug!("yielding_response event_type={:?}, has_data={}", 
+                                debug!("yielding_response event_type={:?}, has_data={}",
                                     response.event,
                                     response.data.is_some()
                                 );
