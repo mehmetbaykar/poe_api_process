@@ -71,32 +71,6 @@ impl PoeClient {
         #[cfg(feature = "xml")]
         let original_tools_for_detection = request.tools.clone();
 
-        // When xml feature is enabled, automatically convert tools to XML format
-        #[cfg(feature = "xml")]
-        {
-            if request.tools.is_some() {
-                #[cfg(feature = "trace")]
-                debug!("XML feature detected, automatically converting tools to XML format");
-
-                // Use methods from xml module
-                request.append_tools_as_xml();
-                request.tools = None; // Clear original tool definitions
-            }
-
-            // If there are tool results, also convert to XML format and clear original data
-            if request.tool_results.is_some() {
-                #[cfg(feature = "trace")]
-                debug!("XML feature detected, automatically converting tool results to XML format");
-
-                // Convert tool results to XML format and append to end of message
-                request.append_tool_results_as_xml();
-
-                // Clear original tool calls and results since they are converted to XML format
-                request.tool_calls = None;
-                request.tool_results = None;
-            }
-        }
-
         let url = format!("{}/bot/{}", self.poe_base_url, self.bot_name);
 
         #[cfg(feature = "trace")]
@@ -828,43 +802,9 @@ impl PoeClient {
         // Create a new request containing tool results
         let mut request = original_request;
 
-        // When xml feature is enabled, append tool results in XML format to the end of the message
-        #[cfg(feature = "xml")]
-        {
-            #[cfg(feature = "trace")]
-            debug!(
-                "XML feature detected, converting tool results to XML format and appending to the end of the message"
-            );
-
-            // Set tool calls and results first so XML conversion methods can access them
-            request.tool_calls = Some(tool_calls);
-            request.tool_results = Some(tool_results);
-
-            // Convert tool results to XML format and append to the end of the message
-            request.append_tool_results_as_xml();
-
-            // Clear original tool calls and results since they are converted to XML format
-            request.tool_calls = None;
-            request.tool_results = None;
-
-            #[cfg(feature = "trace")]
-            debug!(
-                "🔧 Tool results XML conversion complete, checking message content: {}",
-                request
-                    .query
-                    .iter()
-                    .map(|msg| format!("Role: {}, Content length: {}", msg.role, msg.content.len()))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            );
-        }
-
-        // When xml feature is not enabled, use the original JSON API approach
-        #[cfg(not(feature = "xml"))]
-        {
-            request.tool_calls = Some(tool_calls);
-            request.tool_results = Some(tool_results);
-        }
+        // Use original JSON API approach for tool calls/results transmission
+        request.tool_calls = Some(tool_calls);
+        request.tool_results = Some(tool_results);
 
         #[cfg(feature = "trace")]
         debug!(
