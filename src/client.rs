@@ -251,25 +251,29 @@ impl PoeClient {
                                                     );
                                                 }
 
-                                                // XML tool call detection and buffering logic
+                                                let mut handled_by_xml = false;
                                                 #[cfg(feature = "xml")]
                                                 {
+                                                    let trimmed = text.trim_start();
                                                     // Smart detection based on actual tool definitions
                                                     let should_start_xml_detection = !xml_detection_active && (
                                                         text.contains("<function_call>") ||
                                                         text.contains("<invoke") ||
-                                                        // Check if any defined tool name tags are present
+                                                        text.contains("<parameter ") ||
+                                                        (trimmed.starts_with('<') && trimmed.len() > 1) ||
                                                         available_tools.iter().any(|tool|
-                                                            text.contains(&format!("<{}>", tool.function.name))
+                                                            text.contains(&format!("<{}>", tool.function.name)) ||
+                                                            text.contains(&format!("</{}>", tool.function.name))
                                                         )
                                                     );
                                                     if should_start_xml_detection {
                                                         xml_detection_active = true;
                                                         xml_text_buffer.clear();
                                                         #[cfg(feature = "trace")]
-                                                        debug!("Detected XML tool call with defined tools, starting XML buffering | Clearing buffer to restart");
+                                                        debug!("Detected potential XML tool call content, starting XML buffering");
                                                     }
                                                     if xml_detection_active {
+                                                        handled_by_xml = true;
                                                         xml_text_buffer.push_str(text);
                                                         #[cfg(feature = "trace")]
                                                         debug!("XML mode: Text added to buffer | Length: {}", xml_text_buffer.len());
@@ -322,35 +326,23 @@ impl PoeClient {
                                                             if should_release {
                                                                 #[cfg(feature = "trace")]
                                                                 debug!("XML buffer too large or no tool calls, sending as plain text");
-                                                                // Send buffered text
                                                                 events.push(Ok(ChatResponse {
                                                                     event: event_type.clone(),
                                                                     data: Some(ChatResponseData::Text {
                                                                         text: xml_text_buffer.clone(),
                                                                     }),
                                                                 }));
-                                                                // Reset buffer state
                                                                 xml_text_buffer.clear();
                                                                 xml_detection_active = false;
                                                             } else {
-                                                                // Continue buffering
                                                                 #[cfg(feature = "trace")]
                                                                 debug!("Continuing to buffer XML text, current length: {}", xml_text_buffer.len());
                                                             }
                                                         }
-                                                    } else {
-                                                        // No XML detected, send text directly
-                                                        events.push(Ok(ChatResponse {
-                                                            event: event_type.clone(),
-                                                            data: Some(ChatResponseData::Text {
-                                                                text: text.to_string(),
-                                                            }),
-                                                        }));
                                                     }
                                                 }
 
-                                                #[cfg(not(feature = "xml"))]
-                                                {
+                                                if !handled_by_xml {
                                                     events.push(Ok(ChatResponse {
                                                         event: event_type.clone(),
                                                         data: Some(ChatResponseData::Text {
