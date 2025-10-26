@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-// Bot Chat 請求結構
+// Bot Chat Request structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatRequest {
     pub version: String,
@@ -25,7 +25,7 @@ pub struct ChatRequest {
     pub stop_sequences: Option<Vec<String>>,
 }
 
-// 消息結構
+// Message structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
@@ -35,7 +35,7 @@ pub struct ChatMessage {
     pub content_type: String,
 }
 
-// ChatMessage 的Attachment 結構
+// Attachment structure for ChatMessage
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Attachment {
     pub url: String,
@@ -43,32 +43,63 @@ pub struct Attachment {
     pub content_type: Option<String>,
 }
 
-// 工具定義相關結構
+// Tool definition related structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatTool {
+    #[serde(default = "default_chat_tool_type")]
     pub r#type: String,
+    #[serde(default)]
     pub function: FunctionDefinition,
+    #[serde(flatten, default)]
+    pub extra: HashMap<String, Value>,
 }
 
-// ChatTool 的FunctionDefinition 結構
-#[derive(Debug, Serialize, Deserialize, Clone)]
+fn default_chat_tool_type() -> String {
+    "function".to_string()
+}
+
+impl Default for ChatTool {
+    fn default() -> Self {
+        Self {
+            r#type: default_chat_tool_type(),
+            function: FunctionDefinition::default(),
+            extra: HashMap::new(),
+        }
+    }
+}
+
+// FunctionDefinition structure for ChatTool
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct FunctionDefinition {
+    #[serde(default)]
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<FunctionParameters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returns: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+    #[serde(flatten, default)]
+    pub extra: HashMap<String, Value>,
 }
 
-// FunctionDefinition 的FunctionParameters 結構
-#[derive(Debug, Serialize, Deserialize, Clone)]
+// FunctionParameters structure for FunctionDefinition
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
 pub struct FunctionParameters {
-    pub r#type: String,
-    pub properties: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required: Vec<String>,
+    #[serde(flatten, default)]
+    pub extra: HashMap<String, Value>,
 }
 
-// 工具呼叫相關結構
+// Tool call related structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatToolCall {
     pub id: String,
@@ -76,14 +107,14 @@ pub struct ChatToolCall {
     pub function: FunctionCall,
 }
 
-// ChatToolCall 的FunctionCall 結構
+// FunctionCall structure for ChatToolCall
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FunctionCall {
     pub name: String,
     pub arguments: String,
 }
 
-// 工具呼叫結果
+// Tool call result
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatToolResult {
     pub role: String,
@@ -92,7 +123,7 @@ pub struct ChatToolResult {
     pub content: String,
 }
 
-// 用於追蹤部分工具呼叫
+// Used to track partial tool calls
 #[derive(Debug, Clone, Default)]
 pub struct PartialToolCall {
     pub id: String,
@@ -101,7 +132,7 @@ pub struct PartialToolCall {
     pub function_arguments: String,
 }
 
-// 事件響應
+// Event response
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatResponse {
     pub event: ChatEventType,
@@ -109,7 +140,7 @@ pub struct ChatResponse {
     pub data: Option<ChatResponseData>,
 }
 
-// 事件類型
+// Event type
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum ChatEventType {
     Text,
@@ -120,7 +151,7 @@ pub enum ChatEventType {
     Error,
 }
 
-// 檔案數據結構
+// File data structure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FileData {
     pub url: String,
@@ -129,7 +160,7 @@ pub struct FileData {
     pub inline_ref: String,
 }
 
-// 響應資料的可能類型
+// Possible types of response data
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ChatResponseData {
@@ -145,7 +176,7 @@ pub struct ModelResponse {
     pub data: Vec<ModelInfo>,
 }
 
-// 模型信息
+// Model information
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
@@ -154,7 +185,7 @@ pub struct ModelInfo {
     pub owned_by: String,
 }
 
-// 文件上傳請求結構
+// File upload request structure
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FileUploadRequest {
@@ -167,7 +198,7 @@ pub enum FileUploadRequest {
     },
 }
 
-// 文件上傳響應結構
+// File upload response structure
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileUploadResponse {
     pub attachment_url: String,
@@ -175,4 +206,78 @@ pub struct FileUploadResponse {
     pub mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn function_parameters_accept_optional_fields() {
+        let value = json!({
+            "type": "object",
+            "properties": {
+                "city": { "type": "string" }
+            },
+            "additionalProperties": false
+        });
+
+        let params: FunctionParameters = serde_json::from_value(value).unwrap();
+        assert_eq!(params.r#type.as_deref(), Some("object"));
+        assert!(params.required.is_empty());
+        assert!(params.properties.is_some());
+        assert_eq!(
+            params
+                .extra
+                .get("additionalProperties")
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn chat_tool_defaults_type_and_preserves_extras() {
+        let raw = json!({
+            "function": {
+                "name": "lookup",
+                "strict": true,
+                "returns": { "type": "string" },
+                "parameters": {
+                    "properties": {
+                        "query": { "type": "string" }
+                    },
+                    "dependentRequired": {
+                        "query": ["format"]
+                    }
+                },
+                "x-extra-field": "value"
+            },
+            "metadata": "tool-meta"
+        });
+
+        let tool: ChatTool = serde_json::from_value(raw).unwrap();
+        assert_eq!(tool.r#type, "function");
+        assert_eq!(
+            tool.extra.get("metadata").and_then(|v| v.as_str()),
+            Some("tool-meta")
+        );
+
+        let function = tool.function;
+        assert_eq!(function.name, "lookup");
+        assert_eq!(function.strict, Some(true));
+        assert!(function.returns.is_some());
+        assert_eq!(
+            function.extra.get("x-extra-field").and_then(|v| v.as_str()),
+            Some("value")
+        );
+
+        let parameters = function.parameters.unwrap();
+        assert!(parameters.required.is_empty());
+        assert!(parameters.properties.is_some());
+        assert!(
+            parameters.extra.get("dependentRequired").is_some(),
+            "dependentRequired should be preserved in extra map"
+        );
+    }
 }

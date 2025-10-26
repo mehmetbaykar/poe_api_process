@@ -2,6 +2,9 @@ pub mod client;
 pub mod error;
 pub mod types;
 
+#[cfg(feature = "trace")]
+pub mod logging;
+
 #[cfg(feature = "xml")]
 pub mod xml;
 
