@@ -320,12 +320,12 @@ impl XmlToolCallParser {
 
         #[cfg(feature = "trace")]
         {
-            use tracing::debug;
-            debug!(
+            use tracing::trace;
+            trace!(
                 "Starting XML tool call parsing, text length: {}",
                 text.len()
             );
-            debug!("Text preview: {}", text);
+            trace!("Text preview: {}", text);
         }
 
         // First, find <tool_call> wrapped tool calls
@@ -340,20 +340,20 @@ impl XmlToolCallParser {
                 let current_call_id = get_next_call_id();
                 #[cfg(feature = "trace")]
                 {
-                    use tracing::debug;
-                    debug!(
+                    use tracing::trace;
+                    trace!(
                         "Found complete tool call #{}, start position: {}, end position: {}",
                         current_call_id, actual_start, actual_end
                     );
-                    debug!("Tool call content: {}", call_content);
+                    trace!("Tool call content: {}", call_content);
                 }
 
                 if let Some(tool_call) = Self::parse_single_tool_call(call_content, current_call_id)
                 {
                     #[cfg(feature = "trace")]
                     {
-                        use tracing::debug;
-                        debug!(
+                        use tracing::trace;
+                        trace!(
                             "Successfully parsed tool call #{}: {}",
                             current_call_id, tool_call.function.name
                         );
@@ -362,8 +362,8 @@ impl XmlToolCallParser {
                 } else {
                     #[cfg(feature = "trace")]
                     {
-                        use tracing::debug;
-                        debug!("Could not parse tool call #{}", current_call_id);
+                        use tracing::trace;
+                        trace!("Could not parse tool call #{}", current_call_id);
                     }
                 }
 
@@ -371,8 +371,8 @@ impl XmlToolCallParser {
             } else {
                 #[cfg(feature = "trace")]
                 {
-                    use tracing::debug;
-                    debug!("Found <tool_call> but no corresponding </tool_call>, stopping parsing");
+                    use tracing::trace;
+                    trace!("Found <tool_call> but no corresponding </tool_call>, stopping parsing");
                 }
                 break;
             }
@@ -391,12 +391,12 @@ impl XmlToolCallParser {
                     let current_call_id = get_next_call_id();
                     #[cfg(feature = "trace")]
                     {
-                        use tracing::debug;
-                        debug!(
+                        use tracing::trace;
+                        trace!(
                             "Found direct invoke call #{}, start position: {}, end position: {}",
                             current_call_id, actual_start, actual_end
                         );
-                        debug!("invoke call content: {}", invoke_content);
+                        trace!("invoke call content: {}", invoke_content);
                     }
 
                     if let Some(tool_call) =
@@ -404,8 +404,8 @@ impl XmlToolCallParser {
                     {
                         #[cfg(feature = "trace")]
                         {
-                            use tracing::debug;
-                            debug!(
+                            use tracing::trace;
+                            trace!(
                                 "Successfully parsed direct invoke call #{}: {}",
                                 current_call_id, tool_call.function.name
                             );
@@ -414,8 +414,8 @@ impl XmlToolCallParser {
                     } else {
                         #[cfg(feature = "trace")]
                         {
-                            use tracing::debug;
-                            debug!("Could not parse direct invoke call #{}", current_call_id);
+                            use tracing::trace;
+                            trace!("Could not parse direct invoke call #{}", current_call_id);
                         }
                     }
 
@@ -423,8 +423,8 @@ impl XmlToolCallParser {
                 } else {
                     #[cfg(feature = "trace")]
                     {
-                        use tracing::debug;
-                        debug!("Found <invoke but no corresponding </invoke>, stopping parsing");
+                        use tracing::trace;
+                        trace!("Found <invoke but no corresponding </invoke>, stopping parsing");
                     }
                     break;
                 }
@@ -433,8 +433,8 @@ impl XmlToolCallParser {
 
         #[cfg(feature = "trace")]
         {
-            use tracing::debug;
-            debug!(
+            use tracing::trace;
+            trace!(
                 "XML tool call parsing complete, found {} tool calls",
                 tool_calls.len()
             );
@@ -477,12 +477,12 @@ impl XmlToolCallParser {
     fn parse_single_tool_call(xml_content: &str, call_id: u64) -> Option<ChatToolCall> {
         #[cfg(feature = "trace")]
         {
-            use tracing::debug;
-            debug!(
+            use tracing::trace;
+            trace!(
                 "Attempting to parse single tool call, content length: {}",
                 xml_content.len()
             );
-            debug!(
+            trace!(
                 "XML content preview: {}",
                 safe_string_truncate(xml_content, 200)
             );
@@ -494,8 +494,8 @@ impl XmlToolCallParser {
 
             #[cfg(feature = "trace")]
             {
-                use tracing::debug;
-                debug!(
+                use tracing::trace;
+                trace!(
                     "Successfully parsed invoke format, tool name: {}, arguments: {}",
                     function_name, arguments
                 );
@@ -518,8 +518,8 @@ impl XmlToolCallParser {
 
             #[cfg(feature = "trace")]
             {
-                use tracing::debug;
-                debug!(
+                use tracing::trace;
+                trace!(
                     "Successfully parsed old format, tool name: {}, arguments: {}",
                     function_name, arguments
                 );
@@ -543,8 +543,8 @@ impl XmlToolCallParser {
 
             #[cfg(feature = "trace")]
             {
-                use tracing::debug;
-                debug!(
+                use tracing::trace;
+                trace!(
                     "Successfully parsed direct tool name format, tool name: {}, arguments: {}",
                     function_name, arguments
                 );
@@ -562,8 +562,8 @@ impl XmlToolCallParser {
 
         #[cfg(feature = "trace")]
         {
-            use tracing::debug;
-            debug!("Could not parse tool call, no valid tool name found");
+            use tracing::trace;
+            trace!("Could not parse tool call, no valid tool name found");
         }
 
         None
@@ -601,9 +601,9 @@ impl XmlToolCallParser {
 
                                 #[cfg(feature = "trace")]
                                 {
-                                    use tracing::debug;
-                                    debug!("Extracted direct tool name: {}", tag_content);
-                                    debug!("Tool content: {}", tool_content);
+                                    use tracing::trace;
+                                    trace!("Extracted direct tool name: {}", tag_content);
+                                    trace!("Tool content: {}", tool_content);
                                 }
 
                                 return Some((tag_content.to_string(), tool_content.to_string()));

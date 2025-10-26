@@ -65,7 +65,7 @@ impl PoeClient {
         #[cfg(not(feature = "xml"))] request: ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
         #[cfg(feature = "trace")]
-        debug!("Starting streaming request, bot_name: {}", self.bot_name);
+        info!("🚀 Starting streaming request | bot: {}", self.bot_name);
 
         // Preserve original tool definitions for XML detection before we mutate the request.
         #[cfg(feature = "xml")]
@@ -149,7 +149,7 @@ impl PoeClient {
                 result.map_err(PoeError::from).map(|chunk| {
                     let chunk_str = String::from_utf8_lossy(&chunk);
                     #[cfg(feature = "trace")]
-                    debug!("Processing stream chunk, size: {} bytes", chunk.len());
+                    trace!("Processing stream chunk, size: {} bytes", chunk.len());
 
                     let mut events = Vec::new();
                     // Add new chunk to static buffer
@@ -169,14 +169,14 @@ impl PoeClient {
 
                         if line == ": ping" {
                             #[cfg(feature = "trace")]
-                            debug!("Received ping signal");
+                            trace!("Received ping signal");
                             continue;
                         }
 
                         if line.starts_with("event: ") {
                             let event_name = line.trim_start_matches("event: ").trim();
                             #[cfg(feature = "trace")]
-                            debug!("Parsing event type: {}", event_name);
+                            trace!("Parsing event type: {}", event_name);
 
                             let event_type = match event_name {
                                 "text" => ChatEventType::Text,
@@ -200,7 +200,7 @@ impl PoeClient {
                         if line.starts_with("data: ") {
                             let data = line.trim_start_matches("data: ").trim();
                             #[cfg(feature = "trace")]
-                            debug!(
+                            trace!(
                                 "Received event data: {}",
                                 if data.len() > 100 { &data[..100] } else { data }
                             );
@@ -211,21 +211,21 @@ impl PoeClient {
                                         if let Ok(json) = serde_json::from_str::<Value>(data) {
                                             if let Some(text) = json.get("text").and_then(Value::as_str) {
                                                 #[cfg(feature = "trace")]
-                                                debug!("Parsed text data, length: {}", text.len());
+                                                trace!("Parsed text data, length: {}", text.len());
 
                                                 // Log text event with potential truncation
                                                 #[cfg(feature = "trace")]
                                                 {
                                                     let (truncated_text, was_truncated) = truncate_str_by_bytes(text, 64 * 1024);
                                                     let loggable_text = if was_truncated { truncated_text } else { text.to_string() };
-                                                    debug!("incoming_text_event event_type={:?}, text_preview={}, original_length={}",
+                                                    trace!("incoming_text_event event_type={:?}, text_preview={}, original_length={}",
                                                         event_type,
                                                         loggable_text.as_str(),
                                                         text.len()
                                                     );
                                                 }
 
-                                                let mut handled_by_xml = false;
+                                                let handled_by_xml = false;
                                                 #[cfg(feature = "xml")]
                                                 {
                                                     let trimmed = text.trim_start();
@@ -771,7 +771,7 @@ impl PoeClient {
                         #[cfg(feature = "trace")]
                         for event in &events {
                             if let Ok(response) = event {
-                                debug!("yielding_response event_type={:?}, has_data={}",
+                                trace!("yielding_response event_type={:?}, has_data={}",
                                     response.event,
                                     response.data.is_some()
                                 );
